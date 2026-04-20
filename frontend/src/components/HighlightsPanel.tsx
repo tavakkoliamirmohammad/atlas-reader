@@ -8,6 +8,7 @@ import {
   deleteHighlight,
   fetchHighlights,
 } from "@/lib/api";
+import { useHighlightsContext } from "./PaperReader";
 
 const COLORS: { id: HighlightColor; label: string; swatch: string; bar: string }[] = [
   { id: "yellow", label: "Yellow", swatch: "#facc15", bar: "rgba(250,204,21,0.85)" },
@@ -44,6 +45,7 @@ const BANNER_AUTO_DISMISS_MS = 3000;
 export function HighlightsPanel() {
   const match = useMatch("/reader/:arxivId");
   const arxivId = match?.params.arxivId;
+  const ctx = useHighlightsContext();
 
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<Highlight[]>([]);
@@ -108,26 +110,34 @@ export function HighlightsPanel() {
 
   if (!arxivId) return null;
 
+  const displayItems = ctx?.items ?? items;
+
   async function save() {
     if (!arxivId) return;
     const quote = draftQuote.trim();
     if (!quote || saving) return;
     setSaving(true);
     try {
-      const id = await createHighlight(arxivId, { quote, color: draftColor });
-      // Optimistic prepend; matches backend "newest first" ordering.
-      setItems((prev) => [
-        {
-          id,
-          arxiv_id: arxivId,
-          quote,
-          color: draftColor,
-          page: null,
-          note: null,
-          created_at: new Date().toISOString(),
-        },
-        ...prev,
-      ]);
+      if (ctx) {
+        // Context path: PaperReader owns the list; don't touch local state.
+        await ctx.onAdd({ quote, color: draftColor });
+      } else {
+        const id = await createHighlight(arxivId, { quote, color: draftColor });
+        // Optimistic prepend; matches backend "newest first" ordering.
+        setItems((prev) => [
+          {
+            id,
+            arxiv_id: arxivId,
+            quote,
+            color: draftColor,
+            page: null,
+            note: null,
+            rects: null,
+            created_at: new Date().toISOString(),
+          },
+          ...prev,
+        ]);
+      }
       setDraftQuote("");
       setDraftColor("yellow");
       setAdding(false);
@@ -139,6 +149,10 @@ export function HighlightsPanel() {
   }
 
   async function remove(id: number) {
+    if (ctx) {
+      await ctx.onDelete(id);
+      return;
+    }
     const prev = items;
     setItems((cur) => cur.filter((h) => h.id !== id));
     try {
@@ -164,8 +178,8 @@ export function HighlightsPanel() {
           <span className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold">
             Highlights
           </span>
-          {items.length > 0 && (
-            <span className="text-[10px] text-slate-500 font-mono">{items.length}</span>
+          {displayItems.length > 0 && (
+            <span className="text-[10px] text-slate-500 font-mono">{displayItems.length}</span>
           )}
         </span>
         <span
@@ -278,29 +292,34 @@ export function HighlightsPanel() {
             </div>
           )}
 
-          {items.length === 0 && !adding && (
+          {displayItems.length === 0 && !adding && (
             <div className="text-[11px] text-slate-500 px-1 py-2 leading-relaxed">
               Click + to add a highlight.
             </div>
           )}
 
-          {items.map((h) => (
+          {displayItems.map((h) => (
             <div
               key={h.id}
               className="group relative rounded-md bg-white/[0.02] hover:bg-white/[0.04] pl-2.5 pr-7 py-1.5 transition-colors"
               style={{ borderLeft: `3px solid ${colorBar(h.color)}` }}
             >
-              <div
-                className="text-[12px] text-slate-200 leading-snug overflow-hidden"
+              <button
+                type="button"
+                onClick={() => {
+                  if (ctx && h.page != null) ctx.onJump(h.page);
+                }}
+                disabled={!ctx || h.page == null}
+                title={h.quote}
+                className="block w-full text-left text-[12px] text-slate-200 leading-snug overflow-hidden bg-transparent border-0 p-0 m-0 disabled:cursor-default enabled:cursor-pointer"
                 style={{
                   display: "-webkit-box",
                   WebkitLineClamp: 2,
                   WebkitBoxOrient: "vertical",
                 }}
-                title={h.quote}
               >
                 {h.quote}
-              </div>
+              </button>
               <button
                 type="button"
                 onClick={() => remove(h.id)}

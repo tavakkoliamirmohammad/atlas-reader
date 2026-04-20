@@ -89,6 +89,13 @@ export async function fetchConversations(arxivId: string): Promise<ChatMessage[]
 
 export type HighlightColor = "yellow" | "coral" | "blue";
 
+export type SelectionRect = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
 export type Highlight = {
   id: number;
   arxiv_id: string;
@@ -96,6 +103,7 @@ export type Highlight = {
   color: HighlightColor;
   page: number | null;
   note: string | null;
+  rects: SelectionRect[] | null;
   created_at: string | null;
 };
 
@@ -108,7 +116,13 @@ export async function fetchHighlights(arxivId: string): Promise<Highlight[]> {
 
 export async function createHighlight(
   arxivId: string,
-  input: { quote: string; color: HighlightColor; page?: number | null; note?: string | null },
+  input: {
+    quote: string;
+    color: HighlightColor;
+    page?: number | null;
+    note?: string | null;
+    rects?: SelectionRect[] | null;
+  },
 ): Promise<number> {
   const r = await fetch(`/api/highlights/${encodeURIComponent(arxivId)}`, {
     method: "POST",
