@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { ChevronDown, ChevronRight, RotateCw } from "lucide-react";
 import {
   type GlossaryTerm,
   extractGlossary,
@@ -151,6 +151,29 @@ export function Glossary({ arxivId }: Props) {
             className="px-2 py-0.5 rounded-md text-[10px] font-semibold cursor-pointer aria-disabled:opacity-50 bg-white/[0.04] border border-white/10 text-slate-300 hover:bg-white/[0.08] hover:border-[color:var(--ac1-mid)] transition-colors"
           >
             {extracting ? "Extracting…" : "Build glossary"}
+          </span>
+        )}
+        {count > 0 && (
+          <span
+            role="button"
+            tabIndex={0}
+            aria-label="Rebuild glossary"
+            aria-disabled={extracting}
+            title="Rebuild glossary"
+            onClick={(e) => {
+              e.stopPropagation();
+              if (!extracting) build();
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                e.stopPropagation();
+                if (!extracting) build();
+              }
+            }}
+            className="w-6 h-6 inline-flex items-center justify-center rounded-md border border-white/10 text-slate-400 hover:text-white hover:border-white/20 cursor-pointer aria-disabled:opacity-50 aria-disabled:cursor-not-allowed"
+          >
+            <RotateCw size={11} className={extracting ? "animate-spin" : undefined} />
           </span>
         )}
       </button>
