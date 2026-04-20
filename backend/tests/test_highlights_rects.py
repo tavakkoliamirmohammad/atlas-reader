@@ -1,6 +1,5 @@
 """Tests for the rects column on highlights (added 2026-04-20)."""
 
-import json
 import sqlite3
 
 from app import db
