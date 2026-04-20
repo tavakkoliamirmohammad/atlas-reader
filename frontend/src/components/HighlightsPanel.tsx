@@ -23,7 +23,7 @@ export function HighlightsPanel() {
   const match = useMatch("/reader/:arxivId");
   const arxivId = match?.params.arxivId;
 
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(false);
   const [items, setItems] = useState<Highlight[]>([]);
   const [adding, setAdding] = useState(false);
   const [draftQuote, setDraftQuote] = useState("");

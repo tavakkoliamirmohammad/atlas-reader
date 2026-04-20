@@ -175,15 +175,6 @@ export function ChatPanel() {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex items-center gap-2 px-4 py-3 border-b border-white/5">
-        <div
-          className="w-[30px] h-[30px] rounded-lg flex items-center justify-center text-sm font-bold"
-          style={{ background: "var(--user-grad)", color: "var(--user-ink)", boxShadow: "0 0 18px var(--ac1-mid)" }}
-        >
-          C
-        </div>
-        <div className="font-semibold text-[15px] text-slate-100">Ask about this paper</div>
-      </div>
       <Glossary arxivId={arxivId} />
       <div className="px-3 py-2.5 border-b border-white/5">
         <div className="text-[10px] uppercase tracking-wider text-slate-500 mb-1.5">Quick actions</div>
@@ -233,24 +224,36 @@ export function ChatPanel() {
                 <kbd className="ml-0.5 px-1 py-px border border-white/10 rounded font-mono text-[9px]">↵</kbd>
               </span>
               <button
-                onClick={send}
-                disabled={streaming || !draft.trim()}
-                aria-label="Send"
+                onClick={streaming ? () => abortRef.current?.abort() : send}
+                disabled={!streaming && !draft.trim()}
+                aria-label={streaming ? "Stop" : "Send"}
+                title={streaming ? "Stop generating" : "Send"}
                 className={[
                   "h-8 w-8 rounded-full flex items-center justify-center",
                   "disabled:opacity-30 disabled:cursor-not-allowed",
                   "cursor-pointer transition-all duration-200",
-                  draft.trim() && !streaming
+                  streaming
+                    ? "hover:scale-110 shadow-[0_0_16px_rgba(244,63,94,0.45)]"
+                    : draft.trim()
                     ? "hover:scale-110 shadow-[0_0_16px_var(--ac1-mid)]"
                     : "",
                 ].join(" ")}
                 style={{
-                  background: draft.trim() && !streaming ? "var(--user-grad)" : "rgba(255,255,255,0.06)",
-                  color: draft.trim() && !streaming ? "var(--user-ink)" : "rgb(148 163 184)",
+                  background: streaming
+                    ? "rgba(244,63,94,0.18)"
+                    : draft.trim()
+                    ? "var(--user-grad)"
+                    : "rgba(255,255,255,0.06)",
+                  color: streaming
+                    ? "rgb(251 113 133)"
+                    : draft.trim()
+                    ? "var(--user-ink)"
+                    : "rgb(148 163 184)",
+                  border: streaming ? "1px solid rgba(244,63,94,0.35)" : undefined,
                 }}
               >
                 {streaming ? (
-                  <span className="block w-2 h-2 rounded-sm bg-current" aria-hidden />
+                  <span className="block w-2.5 h-2.5 rounded-sm bg-current" aria-hidden />
                 ) : (
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                        strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
