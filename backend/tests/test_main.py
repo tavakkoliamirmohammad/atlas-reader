@@ -260,7 +260,7 @@ async def test_ask_streams_and_accepts_history(atlas_data_dir):
     assert f'data: {_json.dumps({"t": "chunk"})}' in body
     assert captured["question"] == "Why?"
     assert captured["history"][0]["content"] == "earlier"
-    assert captured["model"] == "sonnet"
+    assert captured["model"] == "opus"
 
 
 @pytest.mark.asyncio
