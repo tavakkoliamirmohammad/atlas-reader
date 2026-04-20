@@ -49,13 +49,15 @@ async def test_full_ai_round_trip(atlas_data_dir, fixtures_dir):
             row = papers.get("zz")
             assert row["ai_tier"] == 5
 
-            # Summarize -> SSE stream
+            # Summarize -> SSE stream (chunks are JSON-encoded into the data field
+            # so paragraph breaks survive SSE framing).
+            import json as _json
             s = await c.post("/api/summarize/zz")
-            assert "data: ## 1. Background" in s.text
+            assert f'data: {_json.dumps({"t": "## 1. Background\nstuff\n"})}' in s.text
 
             # Ask -> SSE stream (ephemeral, no DB write)
             a = await c.post("/api/ask/zz", json={"question": "Why?", "history": []})
-            assert "data: answer" in a.text
+            assert f'data: {_json.dumps({"t": "answer"})}' in a.text
 
             conv = await c.get("/api/conversations/zz")
             roles = [m["role"] for m in conv.json()["messages"]]

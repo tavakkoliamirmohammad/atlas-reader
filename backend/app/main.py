@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import json
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -121,7 +122,17 @@ class AskBody(BaseModel):
 
 
 def _sse_format(chunk: str) -> bytes:
-    return f"data: {chunk}\n\n".encode("utf-8")
+    """Serialize a streaming text chunk as a single SSE event.
+
+    SSE protocol uses `\n\n` as the event terminator and treats every `\n`
+    inside a `data:` payload as a field separator. Naively interpolating the
+    raw chunk therefore corrupts whitespace whenever the model emits paragraph
+    breaks (the second paragraph silently becomes a new event with no `data:`
+    prefix and gets dropped). JSON-encoding the chunk as a single line keeps
+    every byte intact; the frontend reverses this with JSON.parse.
+    """
+    payload = json.dumps({"t": chunk}, ensure_ascii=False)
+    return f"data: {payload}\n\n".encode("utf-8")
 
 
 _ALLOWED_MODELS = {"opus", "sonnet", "haiku"}
@@ -146,7 +157,8 @@ async def post_summarize(arxiv_id: str, model: str | None = None):
                 yield _sse_format(chunk)
             yield b"event: done\ndata: ok\n\n"
         except Exception as exc:
-            yield f"event: error\ndata: {exc}\n\n".encode("utf-8")
+            err_payload = json.dumps({"message": str(exc)}, ensure_ascii=False)
+            yield f"event: error\ndata: {err_payload}\n\n".encode("utf-8")
 
     return StreamingResponse(gen(), media_type="text/event-stream")
 
@@ -169,7 +181,8 @@ async def post_ask(
                 yield _sse_format(chunk)
             yield b"event: done\ndata: ok\n\n"
         except Exception as exc:
-            yield f"event: error\ndata: {exc}\n\n".encode("utf-8")
+            err_payload = json.dumps({"message": str(exc)}, ensure_ascii=False)
+            yield f"event: error\ndata: {err_payload}\n\n".encode("utf-8")
 
     return StreamingResponse(gen(), media_type="text/event-stream")
 

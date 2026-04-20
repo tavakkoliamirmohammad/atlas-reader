@@ -203,8 +203,11 @@ async def test_summarize_streams_sse_events(atlas_data_dir):
     papers.upsert([Paper("55", "T", "A", "x", "cs.PL", "2026-04-19T08:00:00Z")])
 
     async def _fake(arxiv_id, model="opus"):
-        yield "## 1. "
-        yield "Background\n"
+        # Include paragraph break + bold marker — the regression case that
+        # broke when chunks were embedded raw into `data:` (the `\n\n` was
+        # interpreted as an SSE event terminator and silently dropped).
+        yield "## 1. Background\n\n"
+        yield "**Bold** body."
 
     with patch("app.main.summarizer.summarize", _fake):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
@@ -213,8 +216,12 @@ async def test_summarize_streams_sse_events(atlas_data_dir):
 
     assert r.status_code == 200
     assert r.headers["content-type"].startswith("text/event-stream")
-    assert "data: ## 1. " in body
-    assert "data: Background\n" in body
+    # Each chunk is JSON-encoded into the SSE `data:` field so newlines
+    # and markdown markers survive transport.
+    import json as _json
+    assert f'data: {_json.dumps({"t": "## 1. Background\n\n"})}' in body
+    assert f'data: {_json.dumps({"t": "**Bold** body."})}' in body
+    assert "event: done" in body
 
 
 @pytest.mark.asyncio
@@ -248,8 +255,9 @@ async def test_ask_streams_and_accepts_history(atlas_data_dir):
             body = r.text
 
     assert r.status_code == 200
-    assert "data: answer " in body
-    assert "data: chunk" in body
+    import json as _json
+    assert f'data: {_json.dumps({"t": "answer "})}' in body
+    assert f'data: {_json.dumps({"t": "chunk"})}' in body
     assert captured["question"] == "Why?"
     assert captured["history"][0]["content"] == "earlier"
     assert captured["model"] == "sonnet"
