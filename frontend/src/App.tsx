@@ -4,6 +4,7 @@ import { TopBar } from "./components/TopBar";
 import { AuroraBackground } from "./components/AuroraBackground";
 import { PaperList } from "./components/PaperList";
 import { RightPanel } from "./components/RightPanel";
+import { RightPanelResizer } from "./components/RightPanelResizer";
 import { ReopenTab } from "./components/ReopenTab";
 import { IndexRoute } from "./routes/IndexRoute";
 import { ReaderRoute } from "./routes/ReaderRoute";
@@ -60,7 +61,9 @@ export default function App() {
   });
 
   const leftW = leftCollapsed ? "0px" : "270px";
-  const rightW = rightCollapsed ? "0px" : "320px";
+  // Right panel width is driven by --right-w (set by RightPanelResizer / persisted
+  // in localStorage). When collapsed we fall back to 0.
+  const rightW = rightCollapsed ? "0px" : "var(--right-w)";
 
   return (
     <div className="stage-shell">
@@ -89,6 +92,7 @@ export default function App() {
 
         <aside className={["glass-panel relative border-l border-white/5 overflow-hidden transition-opacity flex flex-col",
                            rightCollapsed ? "opacity-0 pointer-events-none" : ""].join(" ")}>
+          {!rightCollapsed && <RightPanelResizer />}
           <RightPanel />
         </aside>
 

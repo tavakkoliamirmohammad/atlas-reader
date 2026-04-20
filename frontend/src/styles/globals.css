@@ -21,6 +21,31 @@
 html, body, #root { height: 100%; overflow: hidden; }
 body { background: #08080d; color: #e5e7ef; font-family: Inter, system-ui, sans-serif; }
 
+/* ---------- Slim, dark, subtle scrollbars (site-wide) ----------
+   Webkit browsers get a 6px-wide rail with a translucent thumb that
+   brightens on hover. Firefox uses the standard scrollbar-* properties. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.08) transparent;
+}
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.18);
+}
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
 .aurora-bg {
   position: absolute; inset: -40%; pointer-events: none; opacity: 0.35;
   background:
