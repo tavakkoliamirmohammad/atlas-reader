@@ -159,20 +159,14 @@ export function StreamingMessage({ role, content, isStreaming, model }: Props) {
         ) : isUser ? (
           content
         ) : (
-          <>
+          <div className={isStreaming ? "is-streaming" : undefined}>
             <ReactMarkdown
               remarkPlugins={[remarkGfm, remarkMath]}
               rehypePlugins={[rehypeKatex]}
             >
               {isStreaming ? sanitizeStreamingMarkdown(content) : content}
             </ReactMarkdown>
-            {isStreaming && (
-              <span
-                className="inline-block ml-1 w-1.5 h-3 bg-current opacity-60 align-middle animate-pulse"
-                aria-hidden
-              />
-            )}
-          </>
+          </div>
         )}
       </div>
     </div>

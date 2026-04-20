@@ -149,6 +149,33 @@ body { background: #08080d; color: #e5e7ef; font-family: Inter, system-ui, sans-
 .markdown-body .katex { color: rgb(226 232 240); }
 .markdown-body .katex-display { margin: 0.6em 0; }
 
+/* ---------- Streaming caret ----------
+   A 1px-wide blinking caret tacked onto the very last text-bearing block
+   inside an actively-streaming assistant bubble. We use a `::after` pseudo
+   element on `.is-streaming > *:last-child` so the caret renders on the
+   SAME baseline as the last character of streaming text, instead of
+   dropping to a fresh line below the trailing block. The empty `content`
+   plus inline-block sizing make it a thin vertical rule. */
+.is-streaming > *:last-child::after {
+  content: "";
+  display: inline-block;
+  width: 1px;
+  height: 1em;
+  margin-left: 1px;
+  vertical-align: text-bottom;
+  background-color: currentColor;
+  animation: atlas-caret-blink 1s ease-in-out infinite;
+}
+
+@keyframes atlas-caret-blink {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.2; }
+}
+
+html[data-motion="off"] .is-streaming > *:last-child::after {
+  animation: none !important;
+}
+
 @keyframes atlas-fade-up {
   from { opacity: 0; transform: translateY(6px); }
   to   { opacity: 1; transform: translateY(0); }
