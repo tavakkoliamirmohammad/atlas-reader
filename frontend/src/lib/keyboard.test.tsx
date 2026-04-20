@@ -1,15 +1,17 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { render } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { useGlobalShortcuts } from "./keyboard";
+import { installKeyboard, useShortcut } from "./keyboard";
 import { useUiStore } from "@/stores/ui-store";
 
 function Harness() {
-  useGlobalShortcuts();
+  installKeyboard();
+  useShortcut("[", () => useUiStore.getState().toggleLeft());
+  useShortcut("]", () => useUiStore.getState().toggleRight());
   return <div tabIndex={-1}>ready</div>;
 }
 
-describe("useGlobalShortcuts", () => {
+describe("keyboard registry", () => {
   beforeEach(() => {
     localStorage.clear();
     useUiStore.setState({ paletteId: "cyan-emerald", leftCollapsed: false, rightCollapsed: false, readingMode: "light" });

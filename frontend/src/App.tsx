@@ -1,5 +1,5 @@
 import { Routes, Route, Navigate } from "react-router-dom";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { TopBar } from "./components/TopBar";
 import { AuroraBackground } from "./components/AuroraBackground";
 import { PaperList } from "./components/PaperList";
@@ -9,7 +9,10 @@ import { IndexRoute } from "./routes/IndexRoute";
 import { ReaderRoute } from "./routes/ReaderRoute";
 import { useUiStore } from "./stores/ui-store";
 import { applyPalette, getPaletteById } from "./lib/theme";
-import { useGlobalShortcuts } from "./lib/keyboard";
+import { installKeyboard, useShortcut } from "./lib/keyboard";
+import { installMotionAttribute } from "./lib/motion";
+import { ShortcutsOverlay } from "./components/ShortcutsOverlay";
+import { CommandPalette } from "./components/CommandPalette";
 
 export default function App() {
   const leftCollapsed = useUiStore((s) => s.leftCollapsed);
@@ -21,7 +24,19 @@ export default function App() {
     if (p) applyPalette(p);
   }, [paletteId]);
 
-  useGlobalShortcuts();
+  useEffect(() => {
+    installKeyboard();
+    installMotionAttribute();
+  }, []);
+
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+
+  useShortcut("[", () => useUiStore.getState().toggleLeft());
+  useShortcut("]", () => useUiStore.getState().toggleRight());
+  useShortcut("?", () => setShortcutsOpen((v) => !v));
+  useShortcut("mod+k", () => setPaletteOpen((v) => !v));
+  useShortcut("escape", () => { setShortcutsOpen(false); setPaletteOpen(false); });
 
   const leftW = leftCollapsed ? "0px" : "270px";
   const rightW = rightCollapsed ? "0px" : "320px";
@@ -55,6 +70,9 @@ export default function App() {
                            rightCollapsed ? "opacity-0 pointer-events-none" : ""].join(" ")}>
           <RightPanel />
         </aside>
+
+        <ShortcutsOverlay open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
+        <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
       </div>
     </div>
   );
