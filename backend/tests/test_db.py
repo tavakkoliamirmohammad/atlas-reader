@@ -1,4 +1,4 @@
-from pathlib import Path
+import sqlite3
 
 import pytest
 
@@ -34,3 +34,13 @@ def test_papers_schema_has_expected_columns(atlas_data_dir):
         columns = {row[1] for row in cursor}
     assert {"arxiv_id", "title", "authors", "abstract", "categories",
             "published", "pdf_path", "ai_tier", "ai_score", "read_state"} <= columns
+
+
+def test_foreign_keys_enforced(atlas_data_dir):
+    db.init()
+    with pytest.raises(sqlite3.IntegrityError):
+        with db.connect() as conn:
+            conn.execute(
+                "INSERT INTO conversations (arxiv_id, role, content) VALUES (?, ?, ?)",
+                ("does-not-exist", "user", "hello"),
+            )
