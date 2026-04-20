@@ -4,6 +4,69 @@ import { useUiStore, type ReadingMode } from "@/stores/ui-store";
 import { ReadingProgressRail, type RailSection } from "./ReadingProgressRail";
 import { PdfViewport } from "./PdfViewport";
 
+/**
+ * The arXiv ID pill in the floating toolbar. Click copies `arxiv:{id}` to the
+ * clipboard and flashes "Copied" for ~1.2s; Shift+click opens the paper on
+ * arxiv.org in a new tab. Visual style is unchanged from the prior decorative
+ * span — this is an additive affordance.
+ */
+function ArxivPill({ arxivId }: { arxivId: string }) {
+  const [flash, setFlash] = useState<"idle" | "copied" | "error">("idle");
+  const timerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (timerRef.current !== null) window.clearTimeout(timerRef.current);
+    };
+  }, []);
+
+  function scheduleClear() {
+    if (timerRef.current !== null) window.clearTimeout(timerRef.current);
+    timerRef.current = window.setTimeout(() => {
+      setFlash("idle");
+      timerRef.current = null;
+    }, 1200);
+  }
+
+  function onClick(e: React.MouseEvent<HTMLButtonElement>) {
+    if (e.shiftKey) {
+      window.open(`https://arxiv.org/abs/${arxivId}`, "_blank", "noopener,noreferrer");
+      return;
+    }
+    const text = `arxiv:${arxivId}`;
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(text)
+        .then(() => { setFlash("copied"); scheduleClear(); })
+        .catch(() => { setFlash("error"); scheduleClear(); });
+    } else {
+      setFlash("error");
+      scheduleClear();
+    }
+  }
+
+  const label =
+    flash === "copied" ? "Copied" :
+    flash === "error"  ? "Copy failed" :
+    `arXiv:${arxivId}`;
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={`Copy arxiv id ${arxivId}. Shift-click to open on arxiv.org.`}
+      title="Click to copy · Shift+click to open on arxiv.org"
+      className="font-mono text-[11px] px-2 py-0.5 rounded-full cursor-pointer transition-colors hover:brightness-110"
+      style={{
+        color: "var(--ac1)",
+        background: "var(--ac1-soft)",
+        border: "1px solid var(--ac1-mid)",
+      }}
+    >
+      {label}
+    </button>
+  );
+}
+
 type Props = {
   fileUrl: string;
   mode: ReadingMode;
@@ -183,18 +246,7 @@ export function PdfPage({ fileUrl, mode, arxivId }: Props) {
               "0 8px 24px -10px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.04)",
           }}
         >
-          {arxivId ? (
-            <span
-              className="font-mono text-[11px] px-2 py-0.5 rounded-full"
-              style={{
-                color: "var(--ac1)",
-                background: "var(--ac1-soft)",
-                border: "1px solid var(--ac1-mid)",
-              }}
-            >
-              arXiv:{arxivId}
-            </span>
-          ) : null}
+          {arxivId ? <ArxivPill arxivId={arxivId} /> : null}
           <span className="inline-flex items-center gap-1 rounded-full bg-white/[0.04] p-0.5 border border-white/5">
             {MODES.map(({ id, label, Icon }) => {
               const active = mode === id;
