@@ -23,12 +23,12 @@ export function PdfPage({ fileUrl, mode }: Props) {
       className="rounded-2xl ring-1 ring-white/5 overflow-hidden"
       style={{
         background: MODE_BG[mode],
-        height: "calc(100vh - 130px)",
+        height: "calc(100vh - 100px)",
         transition: "background .25s ease",
       }}
     >
       <iframe
-        src={fileUrl}
+        src={`${fileUrl}#toolbar=0&navpanes=0&scrollbar=1&view=FitH`}
         title="PDF"
         style={{
           width: "100%",
