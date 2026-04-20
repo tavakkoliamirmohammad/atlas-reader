@@ -8,10 +8,11 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 
-from app import db, digest, health, papers, pdf_cache, stats
+from app import asker, conversations, db, digest, health, papers, pdf_cache, stats, summarizer
 
 
 @asynccontextmanager
@@ -70,6 +71,53 @@ async def get_pdf(arxiv_id: str):
 @app.get("/api/stats")
 async def get_stats() -> dict:
     return stats.summary()
+
+
+class AskBody(BaseModel):
+    question: str
+    history: list[dict] = []
+
+
+def _sse_format(chunk: str) -> bytes:
+    return f"data: {chunk}\n\n".encode("utf-8")
+
+
+@app.post("/api/summarize/{arxiv_id}")
+async def post_summarize(arxiv_id: str):
+    if papers.get(arxiv_id) is None:
+        raise HTTPException(status_code=404, detail="paper not found")
+
+    async def gen():
+        try:
+            async for chunk in summarizer.summarize(arxiv_id):
+                yield _sse_format(chunk)
+            yield b"event: done\ndata: ok\n\n"
+        except Exception as exc:
+            yield f"event: error\ndata: {exc}\n\n".encode("utf-8")
+
+    return StreamingResponse(gen(), media_type="text/event-stream")
+
+
+@app.post("/api/ask/{arxiv_id}")
+async def post_ask(arxiv_id: str, body: AskBody):
+    if papers.get(arxiv_id) is None:
+        raise HTTPException(status_code=404, detail="paper not found")
+
+    async def gen():
+        try:
+            async for chunk in asker.ask(arxiv_id, body.question, body.history):
+                yield _sse_format(chunk)
+            yield b"event: done\ndata: ok\n\n"
+        except Exception as exc:
+            yield f"event: error\ndata: {exc}\n\n".encode("utf-8")
+
+    return StreamingResponse(gen(), media_type="text/event-stream")
+
+
+@app.get("/api/conversations/{arxiv_id}")
+async def get_conversations(arxiv_id: str) -> dict:
+    rows = conversations.history(arxiv_id)
+    return {"messages": [_row_to_dict(r) for r in rows]}
 
 
 def _frontend_dist() -> Path | None:
