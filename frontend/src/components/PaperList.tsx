@@ -63,7 +63,7 @@ export function PaperList() {
         <div className="text-[15px] font-semibold mt-0.5 text-slate-100 flex items-center gap-2">
           Daily digest
           <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-white/5 text-slate-400 font-medium">
-            {hasTiers ? "tiered" : "chrono"}
+            {hasTiers ? "AI-ranked" : "Newest first"}
           </span>
         </div>
       </div>

@@ -421,13 +421,23 @@ export function PdfViewport({
     };
   }, [pages, updateVisibleRange]);
 
-  // Invalidate all rendered canvases when `pages` changes (container was
-  // resized → every page has a new scale). The existing canvases were drawn
-  // at the OLD scale; leaving them in place makes them overlap the new slot
-  // at wrong dimensions — the "PDF badly resized" bug. Clear everything and
-  // let the visible-range effect repaint at the new scale.
+  // Invalidate canvases when the container is resized (every page now has a
+  // new scale; old canvases would overlap the new slot at wrong dimensions —
+  // the "PDF badly resized" bug).
+  //
+  // Critical: skip the empty→non-empty transition. That fires on initial load
+  // AND on every fileUrl switch — and the visible-range effect just queued
+  // the first renders for the new doc. If we cancel them here the new PDF
+  // never paints (the "click a paper / type a URL and the PDF doesn't update"
+  // bug). Only invalidate when scale actually changed.
+  const prevPagesRef = useRef<PageMeta[]>([]);
   useEffect(() => {
-    if (pages.length === 0) return;
+    const prev = prevPagesRef.current;
+    prevPagesRef.current = pages;
+    if (pages.length === 0 || prev.length === 0) return;
+    const sameScale =
+      prev.length === pages.length && prev[0].scale === pages[0].scale;
+    if (sameScale) return;
     renderedSetRef.current.clear();
     renderedOrderRef.current = [];
     renderTasksRef.current.forEach((t) => t.cancel());
