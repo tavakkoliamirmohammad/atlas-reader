@@ -79,3 +79,12 @@ async def fetch_recent(query: str, max_results: int = 100, timeout: float = 30.0
         resp = await client.get(ARXIV_ENDPOINT, params=params)
         resp.raise_for_status()
         return parse_feed(resp.text)
+
+
+async def fetch_by_id(arxiv_id: str, timeout: float = 30.0) -> Paper | None:
+    """Fetch a single paper from arXiv by ID. Returns None if not found."""
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        resp = await client.get(ARXIV_ENDPOINT, params={"id_list": arxiv_id})
+        resp.raise_for_status()
+        items = parse_feed(resp.text)
+    return items[0] if items else None

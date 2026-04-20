@@ -8,12 +8,24 @@ import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+import httpx
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from app import asker, conversations, db, digest, health, papers, pdf_cache, stats, summarizer
+from app import (
+    arxiv,
+    asker,
+    conversations,
+    db,
+    digest,
+    health,
+    papers,
+    pdf_cache,
+    stats,
+    summarizer,
+)
 
 
 @asynccontextmanager
@@ -50,26 +62,45 @@ async def get_digest(build: bool = False) -> dict:
     return {"count": len(rows), "papers": [_row_to_dict(r) for r in rows]}
 
 
+async def _ensure_paper_imported(arxiv_id: str) -> bool:
+    """If the paper isn't in the DB, fetch it from arXiv and insert. Return True if known."""
+    if papers.get(arxiv_id) is not None:
+        return True
+    paper = await arxiv.fetch_by_id(arxiv_id)
+    if paper is None:
+        return False
+    papers.upsert([paper])
+    return True
+
+
 @app.get("/api/papers/{arxiv_id}")
 async def get_paper(arxiv_id: str) -> dict:
-    """Return a single paper's metadata, 404 if not found."""
+    """Return paper metadata. Auto-imports from arXiv if not already in DB."""
+    if not await _ensure_paper_imported(arxiv_id):
+        raise HTTPException(status_code=404, detail="paper not found on arXiv")
     row = papers.get(arxiv_id)
-    if row is None:
-        raise HTTPException(status_code=404, detail="paper not found")
+    assert row is not None
     stats.record_open(arxiv_id)
     return _row_to_dict(row)
 
 
 @app.get("/api/pdf/{arxiv_id}")
 async def get_pdf(arxiv_id: str):
-    """Serve the cached PDF for a paper, downloading from arXiv on first request."""
-    if papers.get(arxiv_id) is None:
-        raise HTTPException(status_code=404, detail="paper not found")
-    path = await pdf_cache.ensure_cached(arxiv_id)
-    # Inline disposition so the browser's PDF viewer renders it in an iframe
-    # rather than triggering a download (the default when filename= is set).
-    return FileResponse(
-        path,
+    """Stream the PDF directly from arXiv on every request (no persistent disk cache)."""
+    if not await _ensure_paper_imported(arxiv_id):
+        raise HTTPException(status_code=404, detail="paper not found on arXiv")
+
+    pdf_url = f"https://arxiv.org/pdf/{arxiv_id}"
+
+    async def _stream():
+        async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
+            async with client.stream("GET", pdf_url) as resp:
+                resp.raise_for_status()
+                async for chunk in resp.aiter_bytes(chunk_size=64 * 1024):
+                    yield chunk
+
+    return StreamingResponse(
+        _stream(),
         media_type="application/pdf",
         headers={"Content-Disposition": f'inline; filename="{arxiv_id}.pdf"'},
     )
