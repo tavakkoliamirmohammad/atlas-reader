@@ -2,8 +2,17 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, type Paper } from "@/lib/api";
 import { groupPapersByDay } from "@/lib/group-by-day";
+import { useUiStore, type DigestRange } from "@/stores/ui-store";
 import { UrlBar } from "./UrlBar";
 import { PaperRow } from "./PaperRow";
+
+const RANGE_OPTIONS: { value: DigestRange; label: string }[] = [
+  { value: 3,     label: "3d" },
+  { value: 7,     label: "7d" },
+  { value: 14,    label: "14d" },
+  { value: 30,    label: "30d" },
+  { value: "all", label: "All" },
+];
 
 const TIER_META = {
   A: { label: "Must read",     icon: "🔥", color: "#fb7185" },
@@ -35,14 +44,19 @@ export function PaperList() {
   const [activeIndex, setActiveIndex] = useState(0);
   const navigate = useNavigate();
   const listRef = useRef<HTMLDivElement | null>(null);
+  const digestRange = useUiStore((s) => s.digestRange);
+  const setDigestRange = useUiStore((s) => s.setDigestRange);
 
   useEffect(() => {
     let cancelled = false;
+    setLoading(true);
     (async () => {
       try {
-        let res = await api.digest(false);
-        if (res.count === 0) {
-          res = await api.digest(true);
+        let res = await api.digest(false, digestRange);
+        if (res.count === 0 && digestRange !== "all") {
+          // Only trigger a rebuild for narrow ranges. For wide ranges an
+          // empty result just means the DB really is that sparse.
+          res = await api.digest(true, digestRange);
         }
         if (!cancelled) setPapers(res.papers);
       } catch {
@@ -52,7 +66,7 @@ export function PaperList() {
       }
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [digestRange]);
 
   const hasTiers = papers.some((p) => p.ai_tier != null);
   const tierGroups = hasTiers ? groupByTier(papers) : null;
@@ -123,6 +137,31 @@ export function PaperList() {
         </div>
       </div>
       <UrlBar onSubmit={(id) => navigate(`/reader/${id}`)} />
+      <div
+        role="tablist"
+        aria-label="Archive range"
+        className="flex items-center gap-0.5 px-3 pb-2 pt-0"
+      >
+        {RANGE_OPTIONS.map((opt) => {
+          const active = digestRange === opt.value;
+          return (
+            <button
+              key={String(opt.value)}
+              role="tab"
+              aria-selected={active}
+              onClick={() => setDigestRange(opt.value)}
+              className={[
+                "px-2 py-0.5 rounded-full text-[10.5px] font-medium transition-colors cursor-pointer",
+                active
+                  ? "bg-[color:var(--ac1-soft)] text-[color:var(--ac1)] border border-[color:var(--ac1-mid)]"
+                  : "text-slate-400 hover:text-slate-200 border border-transparent",
+              ].join(" ")}
+            >
+              {opt.label}
+            </button>
+          );
+        })}
+      </div>
       <div
         ref={listRef}
         className="flex-1 overflow-y-auto"

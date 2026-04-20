@@ -1,8 +1,8 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
-import type { HighlightColor, ModelChoice } from "@/lib/api";
+import type { DigestRange, HighlightColor, ModelChoice } from "@/lib/api";
 
-export type { ModelChoice };
+export type { DigestRange, ModelChoice };
 
 export type ReadingMode = "light" | "sepia" | "dark";
 
@@ -18,6 +18,8 @@ type UiState = {
   readingMode: ReadingMode;
   model: ModelChoice;
   lastHighlightColor: HighlightColor;
+  digestRange: DigestRange;
+  setDigestRange: (r: DigestRange) => void;
   // Ephemeral action dispatchers — NOT persisted. The action-id counters let
   // subscribers fire on each increment via a `useEffect(..., [id])`.
   summarizeRequestId: number;
@@ -49,6 +51,8 @@ export const useUiStore = create<UiState>()(
       readingMode: "light",
       model: "sonnet",
       lastHighlightColor: "yellow",
+      digestRange: 7,
+      setDigestRange: (r) => set({ digestRange: r }),
       summarizeRequestId: 0,
       askRequest: null,
       pinnedQuote: null,
@@ -85,6 +89,7 @@ export const useUiStore = create<UiState>()(
         readingMode: s.readingMode,
         model: s.model,
         lastHighlightColor: s.lastHighlightColor,
+        digestRange: s.digestRange,
       }),
     },
   ),

@@ -432,3 +432,29 @@ async def test_glossary_definition_404_for_unknown_paper(atlas_data_dir):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
         r = await c.get("/api/glossary/missing/MLIR/definition")
     assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_digest_days_all_returns_every_paper(atlas_data_dir):
+    db.init()
+    from app.arxiv import Paper
+    # Seed one recent + one ancient paper.
+    papers.upsert([
+        Paper("rangeA", "recent", "A", "x", "cs.PL", "2026-04-19T08:00:00Z"),
+        Paper("rangeB", "ancient", "A", "x", "cs.PL", "2019-01-01T00:00:00Z"),
+    ])
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        seven = await c.get("/api/digest?days=7")
+        all_ = await c.get("/api/digest?days=all")
+    assert {p["arxiv_id"] for p in seven.json()["papers"]} == {"rangeA"}
+    assert {p["arxiv_id"] for p in all_.json()["papers"]} == {"rangeA", "rangeB"}
+
+
+@pytest.mark.asyncio
+async def test_digest_days_rejects_invalid(atlas_data_dir):
+    db.init()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        bad = await c.get("/api/digest?days=banana")
+        neg = await c.get("/api/digest?days=-1")
+    assert bad.status_code == 400
+    assert neg.status_code == 400

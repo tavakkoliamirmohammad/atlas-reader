@@ -59,10 +59,21 @@ def _row_to_dict(row) -> dict:
 
 
 @app.get("/api/digest")
-async def get_digest(build: bool = False) -> dict:
+async def get_digest(build: bool = False, days: str = "7") -> dict:
     if build:
         await digest.build_today()
-    rows = papers.list_recent(days=7)
+    days_arg: int | None
+    if days == "all":
+        days_arg = None
+    else:
+        try:
+            n = int(days)
+            if n <= 0:
+                raise HTTPException(status_code=400, detail="days must be positive or 'all'")
+            days_arg = n
+        except ValueError:
+            raise HTTPException(status_code=400, detail="days must be an integer or 'all'")
+    rows = papers.list_recent(days=days_arg)
     return {"count": len(rows), "papers": [_row_to_dict(r) for r in rows]}
 
 

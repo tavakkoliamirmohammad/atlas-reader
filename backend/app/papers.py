@@ -41,10 +41,18 @@ def get(arxiv_id: str) -> Optional[sqlite3.Row]:
         return cur.fetchone()
 
 
-def list_recent(days: int = 1) -> list[sqlite3.Row]:
-    """Return papers published within the last `days` days, newest first."""
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+def list_recent(days: int | None = 1) -> list[sqlite3.Row]:
+    """Return papers published within the last `days` days, newest first.
+
+    When `days` is None, return ALL papers ordered by published desc.
+    """
     with db.connect() as conn:
+        if days is None:
+            cur = conn.execute(
+                "SELECT * FROM papers ORDER BY published DESC",
+            )
+            return list(cur.fetchall())
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
         cur = conn.execute(
             "SELECT * FROM papers WHERE published >= ? ORDER BY published DESC",
             (cutoff,),

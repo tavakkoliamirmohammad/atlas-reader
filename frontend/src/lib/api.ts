@@ -16,6 +16,10 @@ export type Paper = {
 export type HealthResponse = { ai: boolean; papers_today: number };
 export type DigestResponse = { count: number; papers: Paper[] };
 
+// Defined here (not imported from the ui-store) to avoid a circular import:
+// ui-store.ts imports `HighlightColor` + `ModelChoice` from this module.
+export type DigestRange = 3 | 7 | 14 | 30 | "all";
+
 async function getJson<T>(path: string): Promise<T> {
   const res = await fetch(path);
   if (!res.ok) throw new Error(`${path} -> ${res.status}`);
@@ -24,7 +28,13 @@ async function getJson<T>(path: string): Promise<T> {
 
 export const api = {
   health:  () => getJson<HealthResponse>("/api/health"),
-  digest:  (build = false) => getJson<DigestResponse>(`/api/digest${build ? "?build=true" : ""}`),
+  digest:  (build = false, days: DigestRange = 7) => {
+    const params = new URLSearchParams();
+    if (build) params.set("build", "true");
+    params.set("days", String(days));
+    const qs = params.toString();
+    return getJson<DigestResponse>(`/api/digest${qs ? `?${qs}` : ""}`);
+  },
   paper:   (id: string) => getJson<Paper>(`/api/papers/${encodeURIComponent(id)}`),
   pdfUrl:  (id: string) => `/api/pdf/${encodeURIComponent(id)}`,
 };
