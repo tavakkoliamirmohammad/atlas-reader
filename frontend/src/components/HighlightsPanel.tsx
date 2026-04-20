@@ -44,10 +44,18 @@ export function HighlightsPanel() {
   }, [arxivId]);
 
   useEffect(() => {
-    if (adding) {
-      // focus the textarea when the form opens
-      setTimeout(() => textareaRef.current?.focus(), 0);
+    if (!adding) return;
+    setTimeout(() => textareaRef.current?.focus(), 0);
+    // Try to auto-prefill from the clipboard. The iframe PDF viewer doesn't
+    // expose selection to JS, but the user can Cmd+C inside it and we read
+    // the clipboard here. Only triggers if the textarea is currently empty.
+    if (draftQuote === "" && navigator.clipboard?.readText) {
+      navigator.clipboard.readText().then((text) => {
+        const trimmed = text?.trim();
+        if (trimmed && trimmed.length < 4000) setDraftQuote(trimmed);
+      }).catch(() => { /* clipboard permission denied — silent */ });
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [adding]);
 
   if (!arxivId) return null;
@@ -157,6 +165,9 @@ export function HighlightsPanel() {
                 rows={3}
                 className="w-full bg-transparent border-0 outline-none text-[12px] text-slate-200 placeholder:text-slate-500 resize-none"
               />
+              <div className="text-[10px] text-slate-500 -mt-1">
+                Tip: select text in the PDF, press <kbd className="px-1 py-px border border-white/10 rounded font-mono text-[9px]">⌘C</kbd>, then click <kbd className="px-1 py-px border border-white/10 rounded font-mono text-[9px]">+</kbd> — your clipboard auto-fills here.
+              </div>
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-1.5">
                   {COLORS.map((c) => {
