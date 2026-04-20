@@ -24,11 +24,12 @@ const MODE_FILTER: Record<ReadingMode, string> = {
   dark: "invert(0.92) hue-rotate(180deg)",
 };
 
-const PAGE_BG: Record<ReadingMode, string> = {
-  light: "#ffffff",
-  sepia: "#f4ead4",
-  dark: "#1a1c22",
-};
+// Canvases and page shells are painted WHITE in every mode. The scroll
+// container's CSS `filter:` themes them uniformly (sepia via sepia/hue-rotate,
+// dark via invert/hue-rotate). Painting the canvas dark and THEN inverting
+// collapses contrast — that's the "washed-out PDF" bug.
+const PAGE_BG_RENDER = "#ffffff";
+const PAGE_BG_SHELL = "#ffffff";
 
 const GAP = 12; // vertical gap between pages, px
 const VIEWPORTS_AHEAD = 2; // render this many viewports of pages above + below visible area
@@ -125,19 +126,30 @@ export function PdfViewport({
   }, [scrollContainerRef]);
 
   // Track container width so we re-layout pages on resize.
+  //
+  // During a drag, ResizeObserver fires on every pixel. Each firing would
+  // trigger a full page-meta recompute (getPage+getViewport × numPages) and
+  // a repaint of every visible canvas. That's the "resize is slow / not
+  // smooth" symptom. Strategy: apply the first width synchronously so first
+  // paint is correct, then debounce subsequent changes ~140ms so a settled
+  // drag triggers a single recompute. Mid-drag, canvases stretch via CSS —
+  // slightly blurry, but snaps back on release.
   useEffect(() => {
     const node = containerRef.current;
     if (!node) return;
-    const updateWidth = () => {
-      // Subtract a little for the side padding so canvases don't bleed into
-      // the rounded corners of the inner viewport.
-      const padding = 24;
-      setContainerWidth(Math.max(0, node.clientWidth - padding));
-    };
-    updateWidth();
-    const ro = new ResizeObserver(updateWidth);
+    const padding = 24;
+    const apply = () => setContainerWidth(Math.max(0, node.clientWidth - padding));
+    apply();
+    let timer: number | null = null;
+    const ro = new ResizeObserver(() => {
+      if (timer !== null) window.clearTimeout(timer);
+      timer = window.setTimeout(apply, 140);
+    });
     ro.observe(node);
-    return () => ro.disconnect();
+    return () => {
+      if (timer !== null) window.clearTimeout(timer);
+      ro.disconnect();
+    };
   }, []);
 
   // Load the PDF document.
@@ -334,7 +346,7 @@ export function PdfViewport({
           canvasContext: ctx,
           viewport,
           transform,
-          background: PAGE_BG[mode],
+          background: PAGE_BG_RENDER,
         } as Parameters<PDFPageProxy["render"]>[0]);
         renderTasksRef.current.set(pageNumber, task);
         await task.promise;
@@ -409,20 +421,23 @@ export function PdfViewport({
     };
   }, [pages, updateVisibleRange]);
 
-  // Re-render rendered pages when the reading mode changes (the canvas bg
-  // hint differs per mode; the CSS filter alone handles the rest, but for
-  // sharpness we re-paint with the matching background color).
+  // Invalidate all rendered canvases when `pages` changes (container was
+  // resized → every page has a new scale). The existing canvases were drawn
+  // at the OLD scale; leaving them in place makes them overlap the new slot
+  // at wrong dimensions — the "PDF badly resized" bug. Clear everything and
+  // let the visible-range effect repaint at the new scale.
   useEffect(() => {
     if (pages.length === 0) return;
-    const toRerender = Array.from(renderedSetRef.current);
     renderedSetRef.current.clear();
     renderedOrderRef.current = [];
-    for (const p of toRerender) {
-      pageRefs.current.get(p)?.querySelector("canvas.pdf-canvas")?.remove();
-    }
-    for (const p of toRerender) renderPage(p);
+    renderTasksRef.current.forEach((t) => t.cancel());
+    renderTasksRef.current.clear();
+    pageRefs.current.forEach((wrap) => {
+      wrap.querySelector("canvas.pdf-canvas")?.remove();
+      wrap.querySelector(".pdf-text-layer")?.remove();
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode]);
+  }, [pages]);
 
   // Selection wiring (Phase 2). Listen to document selectionchange and decide
   // whether the selection lives inside our viewport. Debounce slightly so we
@@ -561,11 +576,9 @@ export function PdfViewport({
               left: 0,
               width: p.width,
               height: p.height,
-              background: PAGE_BG[mode],
+              background: PAGE_BG_SHELL,
               boxShadow:
-                mode === "dark"
-                  ? "0 4px 14px -6px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.04)"
-                  : "0 4px 14px -6px rgba(0,0,0,0.18), 0 0 0 1px rgba(0,0,0,0.04)",
+                "0 4px 14px -6px rgba(0,0,0,0.18), 0 0 0 1px rgba(0,0,0,0.04)",
               borderRadius: 4,
               overflow: "hidden",
             }}
