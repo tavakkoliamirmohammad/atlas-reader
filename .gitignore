@@ -1,0 +1,13 @@
+.superpowers/
+node_modules/
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+claudia-secrets.env
+data/
+*.db
+.DS_Store
+dist/
+build/
