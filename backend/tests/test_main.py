@@ -133,3 +133,34 @@ async def test_unknown_non_api_path_falls_back_to_index_html(tmp_path, monkeypat
         r = await c.get("/reader/2404.12345")
     assert r.status_code == 200
     assert "Atlas SPA" in r.text
+
+
+@pytest.mark.asyncio
+async def test_stats_endpoint_returns_all_fields(atlas_data_dir):
+    db.init()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        r = await c.get("/api/stats")
+    assert r.status_code == 200
+    body = r.json()
+    assert set(body) == {"streak_days", "total_papers", "papers_today"}
+    assert body == {"streak_days": 0, "total_papers": 0, "papers_today": 0}
+
+
+@pytest.mark.asyncio
+async def test_get_paper_records_open_event(atlas_data_dir):
+    db.init()
+    papers.upsert([Paper("ev1", "T", "A", "x", "cs.PL", "2026-04-19T08:00:00Z")])
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        await c.get("/api/papers/ev1")
+        r = await c.get("/api/stats")
+    assert r.json()["papers_today"] == 1
+    assert r.json()["total_papers"] == 1
+
+
+@pytest.mark.asyncio
+async def test_get_paper_missing_does_not_log_event(atlas_data_dir):
+    db.init()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        await c.get("/api/papers/does-not-exist")
+        r = await c.get("/api/stats")
+    assert r.json()["papers_today"] == 0

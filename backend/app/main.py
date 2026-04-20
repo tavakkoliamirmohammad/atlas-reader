@@ -11,7 +11,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from app import db, digest, health, papers, pdf_cache
+from app import db, digest, health, papers, pdf_cache, stats
 
 
 @asynccontextmanager
@@ -54,6 +54,7 @@ async def get_paper(arxiv_id: str) -> dict:
     row = papers.get(arxiv_id)
     if row is None:
         raise HTTPException(status_code=404, detail="paper not found")
+    stats.record_open(arxiv_id)
     return _row_to_dict(row)
 
 
@@ -64,6 +65,11 @@ async def get_pdf(arxiv_id: str):
         raise HTTPException(status_code=404, detail="paper not found")
     path = await pdf_cache.ensure_cached(arxiv_id)
     return FileResponse(path, media_type="application/pdf", filename=f"{arxiv_id}.pdf")
+
+
+@app.get("/api/stats")
+async def get_stats() -> dict:
+    return stats.summary()
 
 
 def _frontend_dist() -> Path | None:
