@@ -144,14 +144,19 @@ export function PaperReader({ arxivId }: Props) {
   const saveFromSelection = useCallback(
     async (color: HighlightColor) => {
       if (!selection) return;
-      await onAdd({
-        quote: selection.text,
-        color,
-        page: selection.page,
-        rects: selection.rects,
-      });
-      setSelection(null);
-      window.getSelection()?.removeAllRanges();
+      try {
+        await onAdd({
+          quote: selection.text,
+          color,
+          page: selection.page,
+          rects: selection.rects,
+        });
+        setSelection(null);
+        window.getSelection()?.removeAllRanges();
+      } catch (err) {
+        // Keep the selection + toolbar so the user can retry. Log for debugging.
+        console.error("[Atlas] failed to save highlight:", err);
+      }
     },
     [selection, onAdd],
   );
@@ -159,9 +164,9 @@ export function PaperReader({ arxivId }: Props) {
   const askFromSelection = useCallback(() => {
     if (!selection) return;
     // Task 6 will wire this to the pinned-quote store. For now: stub.
-    console.info("[SelectionToolbar] ask about selection", {
-      quote: selection.text,
+    console.info("[Atlas TODO(task-6)] Ask-about-this: quote pending pin", {
       page: selection.page,
+      text: selection.text.slice(0, 80),
     });
     setSelection(null);
     window.getSelection()?.removeAllRanges();

@@ -124,6 +124,13 @@ export function PdfPage({
   const internalJumpRef = useRef<((pageNumber: number) => void) | null>(null);
   const jumpRef = externalJumpRef ?? internalJumpRef;
 
+  // Scroll/resize re-evaluation for the floating SelectionToolbar. The toolbar's
+  // absolute position is computed from getBoundingClientRect() of the page
+  // element relative to the card; when the inner PDF scroll container scrolls
+  // or the window resizes, those rects change but nothing else in React state
+  // does — so without this tick the toolbar detaches from its selection.
+  const [, setScrollTick] = useState(0);
+
   const [progress, setProgress] = useState<{
     current: number;
     total: number;
@@ -148,6 +155,30 @@ export function PdfPage({
     },
     [],
   );
+
+  useEffect(() => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    let raf = 0;
+    const onScroll = () => {
+      if (raf) return;
+      raf = window.requestAnimationFrame(() => {
+        raf = 0;
+        setScrollTick((n) => (n + 1) & 0xffff);
+      });
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      el.removeEventListener("scroll", onScroll);
+      if (raf) window.cancelAnimationFrame(raf);
+    };
+  }, []);
+
+  useEffect(() => {
+    const onResize = () => setScrollTick((n) => (n + 1) & 0xffff);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
 
   useEffect(() => {
     const card = cardRef.current;
