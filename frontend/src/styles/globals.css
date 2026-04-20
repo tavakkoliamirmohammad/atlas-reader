@@ -191,6 +191,16 @@ html[data-motion="off"] .is-streaming > *:last-child::after {
   50%      { opacity: 0.6; transform: scale(1.4); }
 }
 
+/* Indeterminate progress bar sweep — used by the PDF LoadingCard when the
+   server omits Content-Length or we haven't seen bytes yet. */
+@keyframes atlas-indeterminate {
+  0%   { transform: translateX(-120%); }
+  100% { transform: translateX(320%); }
+}
+.pdf-loading-indeterminate {
+  animation: atlas-indeterminate 1.2s ease-in-out infinite;
+}
+
 html[data-motion="on"] .fade-up   { animation: atlas-fade-up 240ms ease-out both; }
 html[data-motion="on"] .pulse-dot { animation: atlas-pulse-dot 1.6s ease-in-out infinite; }
 

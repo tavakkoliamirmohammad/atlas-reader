@@ -149,7 +149,7 @@ async def post_summarize(arxiv_id: str, model: str | None = None):
     if papers.get(arxiv_id) is None:
         raise HTTPException(status_code=404, detail="paper not found")
 
-    chosen = _normalize_model(model, "opus")
+    chosen = _normalize_model(model, "sonnet")
 
     async def gen():
         try:

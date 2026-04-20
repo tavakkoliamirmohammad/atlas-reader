@@ -35,6 +35,11 @@ const GAP = 12; // vertical gap between pages, px
 const VIEWPORTS_AHEAD = 2; // render this many viewports of pages above + below visible area
 const RENDER_LRU_LIMIT = 12;
 
+type LoadPhase =
+  | { kind: "fetching"; loaded: number; total: number }
+  | { kind: "parsing" }
+  | { kind: "layout"; done: number; total: number };
+
 export type SelectionRect = {
   x: number;
   y: number;
@@ -114,6 +119,11 @@ export function PdfViewport({
   const [pages, setPages] = useState<PageMeta[]>([]);
   const [containerWidth, setContainerWidth] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [loadPhase, setLoadPhase] = useState<LoadPhase>({
+    kind: "fetching",
+    loaded: 0,
+    total: 0,
+  });
   const [error, setError] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [scrollRatio, setScrollRatio] = useState(0);
@@ -161,6 +171,7 @@ export function PdfViewport({
     // _need_ the synchronous reset so stale pages/canvases don't flash.
     /* eslint-disable react-hooks/set-state-in-effect */
     setLoading(true);
+    setLoadPhase({ kind: "fetching", loaded: 0, total: 0 });
     setError(null);
     setPages([]);
     setCurrentPage(1);
@@ -182,12 +193,17 @@ export function PdfViewport({
     pageRefs.current.clear();
 
     const loadingTask = pdfjsLib.getDocument({ url: fileUrl });
+    loadingTask.onProgress = ({ loaded, total }: { loaded: number; total: number }) => {
+      if (cancelled) return;
+      setLoadPhase({ kind: "fetching", loaded, total });
+    };
     loadingTask.promise
       .then(async (doc) => {
         if (cancelled) {
           doc.destroy();
           return;
         }
+        setLoadPhase({ kind: "parsing" });
         pdfDocRef.current?.destroy();
         pdfDocRef.current = doc;
         setPdfDoc(doc);
@@ -224,6 +240,7 @@ export function PdfViewport({
     let cancelled = false;
 
     const compute = async () => {
+      setLoadPhase({ kind: "layout", done: 0, total: doc.numPages });
       const metas: PageMeta[] = [];
       let offset = 0;
       for (let i = 1; i <= doc.numPages; i++) {
@@ -246,6 +263,7 @@ export function PdfViewport({
         });
         offset += height + GAP;
         page.cleanup();
+        setLoadPhase({ kind: "layout", done: i, total: doc.numPages });
       }
       if (cancelled) return;
       setPages(metas);
@@ -652,22 +670,8 @@ export function PdfViewport({
           </div>
         ))}
 
-        {/* Loading overlay — only shown until first layout completes. */}
-        {loading && (
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-            <div
-              className="flex items-center gap-2 px-3 py-2 rounded-full text-[12px] text-slate-300"
-              style={{
-                background: "rgba(12,14,20,0.65)",
-                border: "1px solid rgba(255,255,255,0.08)",
-                backdropFilter: "blur(6px)",
-              }}
-            >
-              <Loader2 size={14} className="animate-spin" />
-              Loading PDF…
-            </div>
-          </div>
-        )}
+        {/* Loading overlay — richer card with download progress + phase. */}
+        {loading && <LoadingCard phase={loadPhase} />}
 
         {/* Error overlay. */}
         {error && (
@@ -685,6 +689,106 @@ export function PdfViewport({
               </div>
               <div className="text-slate-500 text-[11px] mt-1">{error}</div>
             </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Loading card
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function LoadingCard({ phase }: { phase: LoadPhase }) {
+  // Compute a 0..1 progress value and a label for each phase.
+  let ratio = 0;
+  let title = "Loading PDF";
+  let detail: string | null = null;
+  let indeterminate = false;
+
+  if (phase.kind === "fetching") {
+    title = "Downloading PDF";
+    if (phase.total > 0) {
+      ratio = Math.max(0, Math.min(1, phase.loaded / phase.total));
+      detail = `${formatBytes(phase.loaded)} of ${formatBytes(phase.total)}`;
+    } else if (phase.loaded > 0) {
+      // Content-Length missing — show bytes but keep the bar indeterminate.
+      indeterminate = true;
+      detail = formatBytes(phase.loaded);
+    } else {
+      indeterminate = true;
+    }
+  } else if (phase.kind === "parsing") {
+    title = "Parsing document";
+    indeterminate = true;
+  } else {
+    title = "Preparing pages";
+    ratio = phase.total > 0 ? phase.done / phase.total : 0;
+    detail = `${phase.done} of ${phase.total}`;
+  }
+
+  const pct = Math.round(ratio * 100);
+
+  return (
+    <div className="absolute inset-0 flex items-center justify-center pointer-events-none px-6">
+      <div
+        className="w-full max-w-[320px] rounded-xl px-4 py-3.5"
+        style={{
+          background: "rgba(12,14,20,0.78)",
+          border: "1px solid rgba(255,255,255,0.08)",
+          backdropFilter: "blur(10px)",
+          boxShadow:
+            "0 10px 30px -12px rgba(0,0,0,0.55), 0 0 0 1px var(--ac1-mid)",
+        }}
+      >
+        <div className="flex items-center gap-2 text-[13px] font-medium text-slate-100">
+          <Loader2 size={14} className="animate-spin" style={{ color: "var(--ac1)" }} />
+          <span className="flex-1">{title}</span>
+          {!indeterminate && (
+            <span
+              className="font-mono text-[11px] tabular-nums"
+              style={{ color: "var(--ac1)" }}
+            >
+              {pct}%
+            </span>
+          )}
+        </div>
+
+        <div
+          className="mt-2.5 h-1.5 w-full overflow-hidden rounded-full"
+          style={{ background: "rgba(255,255,255,0.06)" }}
+        >
+          {indeterminate ? (
+            <div
+              className="h-full rounded-full pdf-loading-indeterminate"
+              style={{
+                width: "40%",
+                background:
+                  "linear-gradient(90deg, transparent, var(--ac1) 50%, transparent)",
+              }}
+            />
+          ) : (
+            <div
+              className="h-full rounded-full transition-[width] duration-200 ease-out"
+              style={{
+                width: `${pct}%`,
+                background:
+                  "linear-gradient(90deg, var(--ac1-mid), var(--ac1))",
+                boxShadow: "0 0 8px var(--ac1-mid)",
+              }}
+            />
+          )}
+        </div>
+
+        {detail && (
+          <div className="mt-1.5 font-mono text-[10.5px] text-slate-400 tabular-nums">
+            {detail}
           </div>
         )}
       </div>

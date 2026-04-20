@@ -1,11 +1,12 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
+import type { ModelChoice } from "@/lib/api";
+
+export type { ModelChoice };
 
 export type ReadingMode = "light" | "sepia" | "dark";
 
 export type CustomPalette = { c1: string; c2: string; ink: string };
-
-export type ModelChoice = "opus" | "sonnet" | "haiku";
 
 export type AskRequest = { id: number; prompt: string };
 

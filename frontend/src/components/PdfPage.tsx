@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Sun, Book, Moon } from "lucide-react";
 import { useUiStore, type ReadingMode } from "@/stores/ui-store";
 import { ReadingProgressRail, type RailSection } from "./ReadingProgressRail";
@@ -105,6 +105,24 @@ export function PdfPage({ fileUrl, mode, arxivId }: Props) {
     scrollRatio: number;
   } | null>(null);
   const [sections, setSections] = useState<RailSection[]>([]);
+
+  // PdfViewport's progress effect depends on the onProgress callback
+  // identity — an inline arrow would re-fire the effect on every render
+  // and trigger an infinite setState loop (the PDF's onProgress → parent
+  // setProgress → new arrow → effect re-runs). useCallback keeps it stable.
+  const onProgress = useCallback(
+    (p: { current: number; total: number; scrollRatio: number }) => {
+      setProgress((prev) =>
+        prev &&
+        prev.current === p.current &&
+        prev.total === p.total &&
+        prev.scrollRatio === p.scrollRatio
+          ? prev
+          : { current: p.current, total: p.total, scrollRatio: p.scrollRatio },
+      );
+    },
+    [],
+  );
 
   useEffect(() => {
     const card = cardRef.current;
@@ -217,13 +235,7 @@ export function PdfPage({ fileUrl, mode, arxivId }: Props) {
           mode={mode}
           scrollContainerRef={scrollContainerRef}
           jumpRef={jumpRef}
-          onProgress={(p) =>
-            setProgress({
-              current: p.current,
-              total: p.total,
-              scrollRatio: p.scrollRatio,
-            })
-          }
+          onProgress={onProgress}
           onSections={setSections}
         />
       </div>
