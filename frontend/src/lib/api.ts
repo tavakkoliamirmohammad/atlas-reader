@@ -1,3 +1,5 @@
+import { streamSSE, type SSEHandlers } from "./sse";
+
 export type Paper = {
   arxiv_id: string;
   title: string;
@@ -26,3 +28,41 @@ export const api = {
   paper:   (id: string) => getJson<Paper>(`/api/papers/${encodeURIComponent(id)}`),
   pdfUrl:  (id: string) => `/api/pdf/${encodeURIComponent(id)}`,
 };
+
+export type ChatMessage = { role: "user" | "assistant" | "system"; content: string };
+
+export async function streamSummary(
+  arxivId: string,
+  handlers: SSEHandlers,
+  signal?: AbortSignal,
+): Promise<void> {
+  return streamSSE(`/api/summarize/${arxivId}`, { method: "POST" }, handlers, signal);
+}
+
+export async function streamAsk(
+  arxivId: string,
+  question: string,
+  history: ChatMessage[],
+  handlers: SSEHandlers,
+  signal?: AbortSignal,
+): Promise<void> {
+  return streamSSE(
+    `/api/ask/${arxivId}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question, history }),
+    },
+    handlers,
+    signal,
+  );
+}
+
+export async function fetchConversations(arxivId: string): Promise<ChatMessage[]> {
+  const r = await fetch(`/api/conversations/${arxivId}`);
+  const body = await r.json();
+  return body.messages.map((m: { role: ChatMessage["role"]; content: string }) => ({
+    role: m.role,
+    content: m.content,
+  }));
+}
