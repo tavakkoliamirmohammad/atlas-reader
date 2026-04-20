@@ -1,255 +1,96 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 
-// We deliberately don't import a concrete `PluginRegistry` type from
-// @embedpdf because the PDF reader currently uses a same-origin <iframe>;
-// the rail is wired through a permissive prop so we can swap in the real
-// EmbedPDF registry later without touching this file.
-type PluginRegistryLike = {
-  pluginsReady?: () => Promise<void>;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  getPlugin?: (id: string) => any;
+/**
+ * Section marker on the reading rail. `pageIndex` is zero-based to match the
+ * shape we accept from PDF outlines. `depth` lets us render top-level sections
+ * larger than nested ones.
+ */
+export type RailSection = {
+  title: string;
+  pageIndex: number;
+  depth?: number;
 };
 
-type SectionMarker = {
-  title: string;
-  pageIndex: number; // zero-based
-  depth: number;
+export type ReadingProgress = {
+  /** 1-based current visible page. */
+  current: number;
+  /** Total pages in the document. */
+  total: number;
+  /**
+   * Optional fine-grained scroll progress (0..1). When provided, the filled
+   * portion of the rail tracks scroll continuously instead of snapping to the
+   * page boundary — feels much smoother for long pages.
+   */
+  scrollRatio?: number;
+  /** Optional outline / bookmark markers. */
+  sections?: RailSection[];
 };
 
 type Props = {
   /**
-   * Registry returned from PDFViewer's `onReady`. Pass `null` if the underlying
-   * PDF surface doesn't expose page/outline APIs (e.g. plain <iframe>) — the
-   * rail then renders as a static decoration.
+   * Fully-resolved reading progress. Pass `null` if the underlying PDF surface
+   * doesn't expose page/outline info — the rail renders as a quiet decoration.
    */
-  registry: PluginRegistryLike | null;
+  progress: ReadingProgress | null;
+  /** Click a marker to jump to that page (1-based). */
+  onJumpToPage?: (pageNumber: number) => void;
 };
 
-// Flatten a (possibly nested) bookmark tree into a list of markers with a
-// resolved zero-based page index. Bookmarks whose target we can't resolve to a
-// page are dropped — we only want markers we can actually navigate to.
-function flattenBookmarks(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  nodes: any[] | undefined,
-  depth = 0,
-  out: SectionMarker[] = [],
-): SectionMarker[] {
-  if (!nodes) return out;
-  for (const node of nodes) {
-    const pageIndex = resolveBookmarkPage(node);
-    if (pageIndex != null && typeof node?.title === "string") {
-      out.push({ title: node.title, pageIndex, depth });
-    }
-    if (node?.children?.length) {
-      flattenBookmarks(node.children, depth + 1, out);
-    }
-  }
-  return out;
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function resolveBookmarkPage(node: any): number | null {
-  const target = node?.target;
-  if (!target) return null;
-  if (target.type === "destination" && typeof target.destination?.pageIndex === "number") {
-    return target.destination.pageIndex;
-  }
-  if (
-    target.type === "action" &&
-    target.action &&
-    typeof target.action.destination?.pageIndex === "number"
-  ) {
-    return target.action.destination.pageIndex;
-  }
-  return null;
-}
-
-export function ReadingProgressRail({ registry }: Props) {
-  const [activeDocId, setActiveDocId] = useState<string | null>(null);
-  const [currentPage, setCurrentPage] = useState(1);
-  const [totalPages, setTotalPages] = useState(0);
-  const [markers, setMarkers] = useState<SectionMarker[]>([]);
+export function ReadingProgressRail({ progress, onJumpToPage }: Props) {
   const [hovered, setHovered] = useState<number | null>(null);
 
-  // Track active document (document-manager plugin).
-  useEffect(() => {
-    if (!registry) return;
-    let unsub: undefined | (() => void);
-    let cancelled = false;
+  const isStatic = !progress || progress.total <= 0;
 
-    const wire = async () => {
-      try {
-        await registry.pluginsReady?.();
-      } catch {
-        /* noop */
-      }
-      if (cancelled) return;
-
-      const dm = registry.getPlugin?.("document-manager");
-      const cap = dm?.provides?.();
-      if (!cap) return;
-
-      const initial: string | null = cap.getActiveDocumentId?.() ?? null;
-      if (initial) setActiveDocId(initial);
-
-      if (typeof cap.onActiveDocumentChanged === "function") {
-        unsub = cap.onActiveDocumentChanged(
-          (evt: { currentDocumentId: string | null }) => {
-            setActiveDocId(evt?.currentDocumentId ?? null);
-          },
-        );
-      }
-    };
-
-    wire();
-    return () => {
-      cancelled = true;
-      unsub?.();
-    };
-  }, [registry]);
-
-  // Track scroll / page changes for the active document.
-  useEffect(() => {
-    if (!registry || !activeDocId) return;
-    let unsub: undefined | (() => void);
-    let cancelled = false;
-
-    const wire = async () => {
-      try {
-        await registry.pluginsReady?.();
-      } catch {
-        /* noop */
-      }
-      if (cancelled) return;
-
-      const scroll = registry.getPlugin?.("scroll");
-      const cap = scroll?.provides?.();
-      if (!cap) return;
-
-      // Seed initial values.
-      try {
-        const total = cap.getTotalPages?.() ?? 0;
-        const cur = cap.getCurrentPage?.() ?? 1;
-        setTotalPages(total);
-        setCurrentPage(cur);
-      } catch {
-        /* noop */
-      }
-
-      if (typeof cap.onPageChange === "function") {
-        unsub = cap.onPageChange(
-          (evt: { documentId: string; pageNumber: number; totalPages: number }) => {
-            if (evt.documentId !== activeDocId) return;
-            setCurrentPage(evt.pageNumber);
-            setTotalPages(evt.totalPages);
-          },
-        );
-      }
-    };
-
-    wire();
-    return () => {
-      cancelled = true;
-      unsub?.();
-    };
-  }, [registry, activeDocId]);
-
-  // Load bookmarks (outline) for the active document.
-  useEffect(() => {
-    if (!registry || !activeDocId) {
-      setMarkers([]);
-      return;
+  const fillPct = useMemo(() => {
+    if (!progress || progress.total <= 0) return 0;
+    if (typeof progress.scrollRatio === "number") {
+      return Math.max(0, Math.min(1, progress.scrollRatio)) * 100;
     }
-    let cancelled = false;
-
-    const load = async () => {
-      try {
-        await registry.pluginsReady?.();
-      } catch {
-        /* noop */
-      }
-      if (cancelled) return;
-
-      const bookmark = registry.getPlugin?.("bookmark");
-      const cap = bookmark?.provides?.();
-      if (!cap?.forDocument) {
-        setMarkers([]);
-        return;
-      }
-      try {
-        const task = cap.forDocument(activeDocId).getBookmarks();
-        const result = await task.toPromise();
-        if (cancelled) return;
-        const flat = flattenBookmarks(result?.bookmarks).slice(0, 60);
-        setMarkers(flat);
-      } catch {
-        if (!cancelled) setMarkers([]);
-      }
-    };
-
-    load();
-    return () => {
-      cancelled = true;
-    };
-  }, [registry, activeDocId]);
-
-  const handleJump = (pageIndex: number) => {
-    if (!registry || !activeDocId) return;
-    const scroll = registry.getPlugin?.("scroll");
-    const cap = scroll?.provides?.();
-    if (!cap?.forDocument) return;
-    try {
-      cap.forDocument(activeDocId).scrollToPage({
-        pageNumber: pageIndex + 1,
-        behavior: "smooth",
-      });
-    } catch {
-      /* noop */
-    }
-  };
-
-  const progress = useMemo(() => {
-    if (totalPages <= 1) return totalPages === 1 ? 100 : 0;
-    const ratio = (currentPage - 1) / (totalPages - 1);
+    if (progress.total <= 1) return progress.total === 1 ? 100 : 0;
+    const ratio = (progress.current - 1) / (progress.total - 1);
     return Math.max(0, Math.min(1, ratio)) * 100;
-  }, [currentPage, totalPages]);
+  }, [progress]);
 
-  // Worst-case: no registry. Render the rail as a quiet static decoration.
-  const isStatic = !registry;
+  const sections = progress?.sections ?? [];
+  const total = progress?.total ?? 0;
+  const current = progress?.current ?? 1;
 
   return (
     <div
       className="absolute left-1.5 top-3 bottom-3 z-10 pointer-events-none"
       style={{ width: 14 }}
-      aria-hidden={isStatic || totalPages === 0}
+      aria-hidden={isStatic}
     >
       <div className="relative h-full w-[3px] mx-auto rounded-full bg-white/5 overflow-visible">
         {/* Filled portion */}
         <div
-          className="absolute left-0 right-0 top-0 rounded-full bg-gradient-to-b from-[var(--ac1)] to-[var(--ac2)] transition-[height] duration-300 ease-out"
+          className="absolute left-0 right-0 top-0 rounded-full bg-gradient-to-b from-[var(--ac1)] to-[var(--ac2)] transition-[height] duration-200 ease-out"
           style={{
-            height: `${isStatic ? 0 : progress}%`,
+            height: `${isStatic ? 0 : fillPct}%`,
             boxShadow:
               "0 0 6px rgba(var(--ac1-rgb), 0.55), 0 0 14px rgba(var(--ac2-rgb), 0.25)",
           }}
         />
 
-        {/* Markers */}
+        {/* Section markers */}
         {!isStatic &&
-          totalPages > 1 &&
-          markers.map((m, i) => {
-            const denom = totalPages - 1;
+          total > 1 &&
+          sections.map((m, i) => {
+            const denom = total - 1;
             const top = denom > 0 ? (m.pageIndex / denom) * 100 : 0;
             const clamped = Math.max(0, Math.min(100, top));
-            const reached = m.pageIndex + 1 <= currentPage;
+            const reached = m.pageIndex + 1 <= current;
             const isHovered = hovered === i;
+            const depth = m.depth ?? 0;
             return (
               <button
                 key={`${m.pageIndex}-${i}`}
                 type="button"
-                onClick={() => handleJump(m.pageIndex)}
+                onClick={() => onJumpToPage?.(m.pageIndex + 1)}
                 onMouseEnter={() => setHovered(i)}
-                onMouseLeave={() => setHovered((cur) => (cur === i ? null : cur))}
+                onMouseLeave={() =>
+                  setHovered((cur) => (cur === i ? null : cur))
+                }
                 onFocus={() => setHovered(i)}
                 onBlur={() => setHovered((cur) => (cur === i ? null : cur))}
                 className="pointer-events-auto absolute -translate-y-1/2 -translate-x-1/2 left-1/2"
@@ -260,8 +101,8 @@ export function ReadingProgressRail({ registry }: Props) {
                 <span
                   className="block rounded-full transition-all duration-150"
                   style={{
-                    width: m.depth === 0 ? 7 : 5,
-                    height: m.depth === 0 ? 7 : 5,
+                    width: depth === 0 ? 7 : 5,
+                    height: depth === 0 ? 7 : 5,
                     background: reached
                       ? "linear-gradient(180deg, var(--ac1), var(--ac2))"
                       : "rgba(255,255,255,0.45)",

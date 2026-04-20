@@ -1,18 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { Sun, Book, Moon } from "lucide-react";
 import { useUiStore, type ReadingMode } from "@/stores/ui-store";
-import { ReadingProgressRail } from "./ReadingProgressRail";
+import { ReadingProgressRail, type RailSection } from "./ReadingProgressRail";
+import { PdfViewport } from "./PdfViewport";
 
 type Props = {
   fileUrl: string;
   mode: ReadingMode;
   arxivId?: string;
-};
-
-const MODE_FILTER: Record<ReadingMode, string> = {
-  light: "none",
-  sepia: "sepia(0.5) hue-rotate(-12deg) saturate(1.1) brightness(0.97)",
-  dark:  "invert(0.92) hue-rotate(180deg)",
 };
 
 // Soft radial-gradient backdrops — slightly tinted center, fading to ink
@@ -38,6 +33,15 @@ export function PdfPage({ fileUrl, mode, arxivId }: Props) {
   const [toolbarVisible, setToolbarVisible] = useState(true);
   const hideTimer = useRef<number | null>(null);
   const cardRef = useRef<HTMLDivElement | null>(null);
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const jumpRef = useRef<((pageNumber: number) => void) | null>(null);
+
+  const [progress, setProgress] = useState<{
+    current: number;
+    total: number;
+    scrollRatio: number;
+  } | null>(null);
+  const [sections, setSections] = useState<RailSection[]>([]);
 
   useEffect(() => {
     const card = cardRef.current;
@@ -52,9 +56,9 @@ export function PdfPage({ fileUrl, mode, arxivId }: Props) {
       }, HIDE_AFTER_MS);
     };
 
-    // Watch document-level pointer movement so we still detect "mouse near top of card"
-    // even though the iframe captures its own mouse events. Whenever the pointer is
-    // anywhere over the card's hit-box, we treat it as activity and (re)show the toolbar.
+    // Document-level mousemove still works because we hit-test against the
+    // card's bounding rect — independent of which child element captures
+    // events. Kept for parity with the iframe-era behaviour.
     const onDocMove = (e: MouseEvent) => {
       const rect = card.getBoundingClientRect();
       const inside =
@@ -68,22 +72,21 @@ export function PdfPage({ fileUrl, mode, arxivId }: Props) {
       }
     };
 
-    // The iframe absorbs mouse events when the cursor is over it. Use 'mouseenter' on
-    // the iframe (which DOES fire on the parent before transfer) plus a 'focus' poll
-    // via window 'blur' to know we're inside the iframe area.
-    const onIframeOver = () => {
+    // The pdfjs scroll container is now a normal DOM node, so a plain
+    // mouseenter listener works directly (no iframe event capture to dodge).
+    const onScrollAreaOver = () => {
       setToolbarVisible(true);
       scheduleHide();
     };
-    const iframe = card.querySelector("iframe");
-    iframe?.addEventListener("mouseenter", onIframeOver);
+    const scrollEl = scrollContainerRef.current;
+    scrollEl?.addEventListener("mouseenter", onScrollAreaOver);
 
     document.addEventListener("mousemove", onDocMove);
     scheduleHide();
 
     return () => {
       document.removeEventListener("mousemove", onDocMove);
-      iframe?.removeEventListener("mouseenter", onIframeOver);
+      scrollEl?.removeEventListener("mouseenter", onScrollAreaOver);
       if (hideTimer.current !== null) {
         window.clearTimeout(hideTimer.current);
       }
@@ -102,7 +105,7 @@ export function PdfPage({ fileUrl, mode, arxivId }: Props) {
           "0 0 0 1px var(--ac1-mid), 0 24px 60px -20px rgba(0,0,0,0.55), 0 8px 20px -10px rgba(0,0,0,0.45)",
       }}
     >
-      {/* Page-stack illusion: two faint shadows behind the iframe suggest stacked pages */}
+      {/* Page-stack illusion: two faint shadows behind the viewport suggest stacked pages */}
       <div
         aria-hidden
         className="pointer-events-none absolute inset-x-6 top-3 bottom-6 rounded-xl"
@@ -126,14 +129,14 @@ export function PdfPage({ fileUrl, mode, arxivId }: Props) {
         }}
       />
 
-      {/* Reading-progress rail — sits on the left edge of the card.
-          NOTE: Currently the PDF is rendered via a same-origin <iframe>, so the
-          host page cannot observe scroll position or extract the PDF outline.
-          The rail therefore renders as a static decoration. When the reader is
-          migrated to <PDFViewer /> from @embedpdf/react-pdf-viewer, pass its
-          `onReady(registry)` here to light up real page progress + section
-          markers. */}
-      <ReadingProgressRail registry={null} />
+      {/* Reading-progress rail — sits on the left edge of the card and now
+          tracks real scroll position + page count + outline sections. */}
+      <ReadingProgressRail
+        progress={
+          progress ? { ...progress, sections } : null
+        }
+        onJumpToPage={(p) => jumpRef.current?.(p)}
+      />
 
       {/* The actual document — floats over the gradient with a 2px accent ring */}
       <div
@@ -146,17 +149,19 @@ export function PdfPage({ fileUrl, mode, arxivId }: Props) {
           transition: "background .25s ease, box-shadow .25s ease",
         }}
       >
-        <iframe
-          src={`${fileUrl}#toolbar=0&navpanes=0&scrollbar=1&view=FitH`}
-          title="PDF"
-          style={{
-            width: "100%",
-            height: "100%",
-            border: 0,
-            filter: MODE_FILTER[mode],
-            transition: "filter .25s ease",
-            display: "block",
-          }}
+        <PdfViewport
+          fileUrl={fileUrl}
+          mode={mode}
+          scrollContainerRef={scrollContainerRef}
+          jumpRef={jumpRef}
+          onProgress={(p) =>
+            setProgress({
+              current: p.current,
+              total: p.total,
+              scrollRatio: p.scrollRatio,
+            })
+          }
+          onSections={setSections}
         />
       </div>
 
