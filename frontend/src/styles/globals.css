@@ -201,16 +201,29 @@ html[data-motion="on"] .hover-lift:hover {
   transform: translateY(-1px);
 }
 
+/* Shimmer runs once on mount (not infinitely) to avoid competing with the
+   streaming caret and aurora drift for attention. An additional .shimmer-hover
+   variant re-plays the sweep on hover for chips that want an extra cue. */
 html[data-motion="on"] .shimmer {
   background-image: linear-gradient(100deg, transparent 20%, rgba(255,255,255,0.18) 50%, transparent 80%);
   background-size: 200% 100%;
-  animation: atlas-shimmer 2.4s linear infinite;
+  animation: atlas-shimmer 2.4s linear 1;
+}
+
+html[data-motion="on"] .shimmer-hover {
+  background-image: linear-gradient(100deg, transparent 20%, rgba(255,255,255,0.18) 50%, transparent 80%);
+  background-size: 200% 100%;
+}
+html[data-motion="on"] .shimmer-hover:hover {
+  animation: atlas-shimmer 2.4s linear 1;
 }
 
 html[data-motion="off"] .fade-up,
 html[data-motion="off"] .pulse-dot,
 html[data-motion="off"] .hover-lift,
-html[data-motion="off"] .shimmer {
+html[data-motion="off"] .shimmer,
+html[data-motion="off"] .shimmer-hover,
+html[data-motion="off"] .shimmer-hover:hover {
   animation: none !important;
   transition: none !important;
 }
