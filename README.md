@@ -4,7 +4,17 @@ Local-first paper reviewer. Browses arXiv papers, summarizes on-demand using you
 
 ## Status
 
-**Plan 1 — Backend foundation: complete.** No frontend yet; interact via curl. AI features land in Plan 3.
+**Plan 2 — Frontend shell: complete.** Open `http://localhost:8765` after `atlas start` for the full reader. AI features (Summarize, Ask, tier ranking) land in Plan 3.
+
+## Frontend
+
+```bash
+cd frontend
+pnpm install
+pnpm dev          # dev server on :5173 with API proxy to :8765
+pnpm build        # emits to frontend/dist/, served by FastAPI at /
+pnpm test         # vitest in watch mode
+```
 
 ## Setup
 
