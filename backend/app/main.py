@@ -66,7 +66,13 @@ async def get_pdf(arxiv_id: str):
     if papers.get(arxiv_id) is None:
         raise HTTPException(status_code=404, detail="paper not found")
     path = await pdf_cache.ensure_cached(arxiv_id)
-    return FileResponse(path, media_type="application/pdf", filename=f"{arxiv_id}.pdf")
+    # Inline disposition so the browser's PDF viewer renders it in an iframe
+    # rather than triggering a download (the default when filename= is set).
+    return FileResponse(
+        path,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{arxiv_id}.pdf"'},
+    )
 
 
 @app.get("/api/stats")
