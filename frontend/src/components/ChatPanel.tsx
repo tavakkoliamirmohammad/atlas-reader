@@ -9,6 +9,81 @@ import { StreamingMessage } from "./StreamingMessage";
 import { QuickActionChips } from "./QuickActionChips";
 import { useUiStore, type ModelChoice } from "@/stores/ui-store";
 
+const MODEL_META: Record<ModelChoice, { label: string; tag: string }> = {
+  opus:   { label: "Opus",   tag: "deepest"  },
+  sonnet: { label: "Sonnet", tag: "balanced" },
+  haiku:  { label: "Haiku",  tag: "fastest"  },
+};
+
+function ModelPicker({
+  model, onChange, disabled,
+}: { model: ModelChoice; onChange: (m: ModelChoice) => void; disabled?: boolean }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, [open]);
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => setOpen((v) => !v)}
+        aria-label="Model"
+        aria-expanded={open}
+        className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-[11px] text-slate-300 bg-white/[0.04] border border-white/5 hover:border-[color:var(--ac1-mid)] hover:text-white transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+      >
+        <span className="w-1.5 h-1.5 rounded-full" style={{ background: "var(--ac1)" }} />
+        <span>{MODEL_META[model].label}</span>
+        <svg width="9" height="9" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
+          <path d="M3 4.5l3 3 3-3" />
+        </svg>
+      </button>
+      {open && (
+        <div
+          className="absolute bottom-full left-0 mb-1.5 w-44 rounded-xl bg-zinc-900/95 backdrop-blur-md border border-white/10 shadow-2xl overflow-hidden z-30"
+          role="listbox"
+        >
+          {(["opus", "sonnet", "haiku"] as ModelChoice[]).map((m) => {
+            const active = m === model;
+            return (
+              <button
+                key={m}
+                type="button"
+                role="option"
+                aria-selected={active}
+                onClick={() => { onChange(m); setOpen(false); }}
+                className={[
+                  "w-full flex items-center justify-between px-3 py-2 text-left text-[12px]",
+                  "hover:bg-white/5 transition-colors cursor-pointer",
+                  active ? "bg-[color:var(--ac1-soft)]" : "",
+                ].join(" ")}
+              >
+                <span className="flex items-center gap-2">
+                  <span
+                    className="w-1.5 h-1.5 rounded-full"
+                    style={{ background: active ? "var(--ac1)" : "rgb(100 116 139)" }}
+                  />
+                  <span className={active ? "text-slate-100 font-medium" : "text-slate-300"}>
+                    {MODEL_META[m].label}
+                  </span>
+                </span>
+                <span className="text-[10px] text-slate-500">{MODEL_META[m].tag}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function ChatPanel() {
   // useMatch climbs the URL directly, so this works even though ChatPanel
   // lives outside the <Routes> block (where useParams would return empty).
@@ -126,39 +201,61 @@ export function ChatPanel() {
           />
         ))}
       </div>
-      <div className="px-3 py-2.5 border-t border-white/5">
-        <div className="flex items-end gap-1.5 bg-white/[0.04] border border-white/5 rounded-xl px-2.5 py-1.5 focus-within:border-[color:var(--ac1-mid)]">
+      <div className="px-3 pb-3 pt-2">
+        <div
+          className={[
+            "flex flex-col gap-2 bg-white/[0.04] border rounded-2xl px-3 pt-3 pb-2",
+            "transition-colors duration-200",
+            "border-white/5 focus-within:border-[color:var(--ac1-mid)]",
+            "focus-within:shadow-[0_0_24px_-8px_var(--ac1-mid)]",
+          ].join(" ")}
+        >
           <textarea
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); send(); }
             }}
-            placeholder="Ask anything about this paper... (Cmd+Enter to send)"
+            placeholder="Ask anything about this paper..."
             disabled={streaming}
-            rows={2}
-            className="flex-1 bg-transparent border-0 outline-none text-[13px] text-slate-200 placeholder:text-slate-500 resize-none disabled:opacity-50"
+            rows={3}
+            className="bg-transparent border-0 outline-none text-[13px] leading-relaxed text-slate-100 placeholder:text-slate-500 resize-none disabled:opacity-50 min-h-[60px] max-h-[200px]"
           />
-          <select
-            value={model}
-            onChange={(e) => setModel(e.target.value as ModelChoice)}
-            disabled={streaming}
-            title="Model for the next call"
-            aria-label="Model for the next call"
-            className="bg-white/[0.04] border border-white/10 rounded-md px-1.5 py-1 text-[11px] text-slate-200 outline-none cursor-pointer hover:border-white/20 focus:border-[color:var(--ac1-mid)] disabled:opacity-50"
-          >
-            <option value="opus">opus</option>
-            <option value="sonnet">sonnet</option>
-            <option value="haiku">haiku</option>
-          </select>
-          <button
-            onClick={send}
-            disabled={streaming || !draft.trim()}
-            className="px-2.5 py-1 rounded-md text-[12px] font-semibold disabled:opacity-50 cursor-pointer transition-all hover:translate-y-[-1px]"
-            style={{ background: "var(--user-grad)", color: "var(--user-ink)" }}
-          >
-            Send
-          </button>
+          <div className="flex items-center justify-between gap-2">
+            <ModelPicker model={model} onChange={setModel} disabled={streaming} />
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] text-slate-500 hidden sm:inline">
+                <kbd className="px-1 py-px border border-white/10 rounded font-mono text-[9px]">⌘</kbd>
+                <kbd className="ml-0.5 px-1 py-px border border-white/10 rounded font-mono text-[9px]">↵</kbd>
+              </span>
+              <button
+                onClick={send}
+                disabled={streaming || !draft.trim()}
+                aria-label="Send"
+                className={[
+                  "h-8 w-8 rounded-full flex items-center justify-center",
+                  "disabled:opacity-30 disabled:cursor-not-allowed",
+                  "cursor-pointer transition-all duration-200",
+                  draft.trim() && !streaming
+                    ? "hover:scale-110 shadow-[0_0_16px_var(--ac1-mid)]"
+                    : "",
+                ].join(" ")}
+                style={{
+                  background: draft.trim() && !streaming ? "var(--user-grad)" : "rgba(255,255,255,0.06)",
+                  color: draft.trim() && !streaming ? "var(--user-ink)" : "rgb(148 163 184)",
+                }}
+              >
+                {streaming ? (
+                  <span className="block w-2 h-2 rounded-sm bg-current" aria-hidden />
+                ) : (
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                       strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                    <path d="M5 12l14 0M13 6l6 6-6 6" />
+                  </svg>
+                )}
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     </div>
