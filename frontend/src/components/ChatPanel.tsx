@@ -224,7 +224,13 @@ export function ChatPanel() {
       <div className="flex-1 overflow-y-auto px-3 py-3 flex flex-col gap-2">
         {messages.length === 0 && !streaming && (
           <div className="text-xs text-slate-500 text-center mt-8">
-            Click ⚡ Summarize for a structured deep summary,<br />or ask anything about the paper below.
+            Tip:{" "}
+            <kbd className="px-1 py-px border border-white/10 rounded font-mono text-[10px]">⌘↵</kbd>{" "}
+            send ·{" "}
+            <kbd className="px-1 py-px border border-white/10 rounded font-mono text-[10px]">s</kbd>{" "}
+            summarize ·{" "}
+            <kbd className="px-1 py-px border border-white/10 rounded font-mono text-[10px]">Esc</kbd>{" "}
+            stop
           </div>
         )}
         {messages.map((m, i) => (
