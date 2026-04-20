@@ -1,0 +1,16 @@
+.git
+.gitignore
+.venv
+__pycache__
+*.pyc
+node_modules
+frontend/dist
+.pytest_cache
+.ruff_cache
+.DS_Store
+.atlas
+atlas-data
+.playwright-mcp
+*.log
+docs
+backend/atlas.egg-info

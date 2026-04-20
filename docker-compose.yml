@@ -1,0 +1,12 @@
+services:
+  atlas:
+    build: .
+    image: atlas:local
+    container_name: atlas
+    ports:
+      - "8765:8765"
+    environment:
+      ATLAS_DATA_DIR: /data
+    volumes:
+      - ./atlas-data:/data
+    restart: unless-stopped

@@ -34,6 +34,20 @@ atlas install-launchd     # writes ~/Library/LaunchAgents/com.amir.atlas.plist
 
 To remove: `atlas uninstall-launchd`.
 
+## Docker
+
+Spin up with one command:
+
+```bash
+docker compose up --build
+```
+
+Open http://localhost:8765.
+
+Data persists in `./atlas-data/` (mounted into the container at `/data`).
+
+**Caveat — AI features:** Atlas's summarizer and chat use the local `claude -p` CLI + your Claude subscription. The container doesn't have the CLI or your login, so `/api/health` will report `ai: false` and Ask/Summarize will be unavailable. The reader, digest, highlights, and search all work. For AI features, use `atlas up` on the host.
+
 ## CLI
 
 | Command | What it does |
