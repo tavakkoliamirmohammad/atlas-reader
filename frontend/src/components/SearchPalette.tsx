@@ -59,14 +59,24 @@ export function SearchPalette({ open, onClose }: Props) {
   const [active, setActive] = useState(0);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const listRef = useRef<HTMLUListElement | null>(null);
+  // Remember which element was focused so we can restore focus on close —
+  // otherwise focus falls back to <body> and keyboard users lose their place.
+  const priorFocusRef = useRef<HTMLElement | null>(null);
   const navigate = useNavigate();
 
   useEffect(() => {
     if (open) {
+      priorFocusRef.current = document.activeElement as HTMLElement | null;
       setQuery("");
       setResults([]);
       setActive(0);
       requestAnimationFrame(() => inputRef.current?.focus());
+      return () => {
+        const prior = priorFocusRef.current;
+        if (prior && typeof prior.focus === "function" && document.contains(prior)) {
+          prior.focus();
+        }
+      };
     }
   }, [open]);
 
