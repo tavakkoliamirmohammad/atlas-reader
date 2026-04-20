@@ -1,11 +1,13 @@
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
+import { persist, createJSONStorage } from "zustand/middleware";
 
 export type ReadingMode = "light" | "sepia" | "dark";
 
 export type CustomPalette = { c1: string; c2: string; ink: string };
 
 export type ModelChoice = "opus" | "sonnet" | "haiku";
+
+export type AskRequest = { id: number; prompt: string };
 
 type UiState = {
   paletteId: string;
@@ -14,13 +16,22 @@ type UiState = {
   rightCollapsed: boolean;
   readingMode: ReadingMode;
   model: ModelChoice;
+  // Ephemeral action dispatchers — NOT persisted. The action-id counters let
+  // subscribers fire on each increment via a `useEffect(..., [id])`.
+  summarizeRequestId: number;
+  askRequest: AskRequest | null;
   setPalette: (id: string) => void;
   setCustomPalette: (p: CustomPalette | null) => void;
   toggleLeft: () => void;
   toggleRight: () => void;
   setReadingMode: (m: ReadingMode) => void;
   setModel: (m: ModelChoice) => void;
+  requestSummarize: () => void;
+  requestAsk: (prompt: string) => void;
+  cycleReadingMode: () => void;
 };
+
+const READING_MODE_CYCLE: ReadingMode[] = ["light", "sepia", "dark"];
 
 export const useUiStore = create<UiState>()(
   persist(
@@ -31,13 +42,38 @@ export const useUiStore = create<UiState>()(
       rightCollapsed: false,
       readingMode: "light",
       model: "sonnet",
+      summarizeRequestId: 0,
+      askRequest: null,
       setPalette: (id) => set({ paletteId: id }),
       setCustomPalette: (p) => set({ customPalette: p }),
       toggleLeft: () => set((s) => ({ leftCollapsed: !s.leftCollapsed })),
       toggleRight: () => set((s) => ({ rightCollapsed: !s.rightCollapsed })),
       setReadingMode: (m) => set({ readingMode: m }),
       setModel: (m) => set({ model: m }),
+      requestSummarize: () => set((s) => ({ summarizeRequestId: s.summarizeRequestId + 1 })),
+      requestAsk: (prompt) =>
+        set((s) => ({
+          askRequest: { id: (s.askRequest?.id ?? 0) + 1, prompt },
+        })),
+      cycleReadingMode: () =>
+        set((s) => {
+          const i = READING_MODE_CYCLE.indexOf(s.readingMode);
+          const next = READING_MODE_CYCLE[(i + 1) % READING_MODE_CYCLE.length];
+          return { readingMode: next };
+        }),
     }),
-    { name: "atlas-ui" },
+    {
+      name: "atlas-ui",
+      storage: createJSONStorage(() => localStorage),
+      // Only persist visual preferences — action-dispatcher fields are ephemeral.
+      partialize: (s) => ({
+        paletteId: s.paletteId,
+        customPalette: s.customPalette,
+        leftCollapsed: s.leftCollapsed,
+        rightCollapsed: s.rightCollapsed,
+        readingMode: s.readingMode,
+        model: s.model,
+      }),
+    },
   ),
 );

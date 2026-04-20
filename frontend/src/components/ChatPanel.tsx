@@ -98,6 +98,8 @@ export function ChatPanel() {
   const abortRef = useRef<AbortController | null>(null);
   const model = useUiStore((s) => s.model);
   const setModel = useUiStore((s) => s.setModel);
+  const summarizeRequestId = useUiStore((s) => s.summarizeRequestId);
+  const askRequest = useUiStore((s) => s.askRequest);
 
   // Wipe ephemeral messages on paper switch.
   useEffect(() => {
@@ -105,6 +107,23 @@ export function ChatPanel() {
     setMessages([]);
     return () => { abortRef.current?.abort(); };
   }, [arxivId]);
+
+  // External summarize trigger — fires when command-palette or `s` shortcut
+  // increments summarizeRequestId. Skip the initial 0 so we don't auto-fire.
+  useEffect(() => {
+    if (!arxivId || streaming) return;
+    if (summarizeRequestId === 0) return;
+    void summarize();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [summarizeRequestId]);
+
+  // External ask trigger — sends the prompt directly (no draft round-trip).
+  useEffect(() => {
+    if (!arxivId || streaming) return;
+    if (!askRequest) return;
+    void send(askRequest.prompt);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [askRequest]);
 
   if (!arxivId) {
     return (
@@ -127,9 +146,9 @@ export function ChatPanel() {
     });
   }
 
-  async function send() {
-    if (!arxivId || !draft.trim() || streaming) return;
-    const question = draft.trim();
+  async function send(overridePrompt?: string) {
+    const question = (overridePrompt ?? draft).trim();
+    if (!arxivId || !question || streaming) return;
     const historyForBackend = messages;
     setDraft("");
     setMessages((m) => [
@@ -167,10 +186,7 @@ export function ChatPanel() {
   }
 
   function quickAsk(prompt: string) {
-    setDraft(prompt);
-    setTimeout(() => {
-      send();
-    }, 0);
+    void send(prompt);
   }
 
   return (
@@ -224,7 +240,7 @@ export function ChatPanel() {
                 <kbd className="ml-0.5 px-1 py-px border border-white/10 rounded font-mono text-[9px]">↵</kbd>
               </span>
               <button
-                onClick={streaming ? () => abortRef.current?.abort() : send}
+                onClick={streaming ? () => abortRef.current?.abort() : () => send()}
                 disabled={!streaming && !draft.trim()}
                 aria-label={streaming ? "Stop" : "Send"}
                 title={streaming ? "Stop generating" : "Send"}

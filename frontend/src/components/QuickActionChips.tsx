@@ -1,15 +1,10 @@
+import { QUICK_PROMPTS } from "@/lib/quick-prompts";
+
 type Props = {
   onSummarize: () => void;
   onQuickAsk: (prompt: string) => void;
   disabled?: boolean;
 };
-
-const QUICK = [
-  { label: "Key contributions",     prompt: "What are the key contributions of this paper, in 3-5 bullet points?", icon: "★" },
-  { label: "Compare to prior work", prompt: "How does this paper compare to closely related prior work? Cite the papers it positions against.", icon: "≈" },
-  { label: "Open questions",        prompt: "What are the most interesting open questions or future-work directions this paper raises?", icon: "?" },
-  { label: "Reproduce setup",       prompt: "Walk me through the exact setup needed to reproduce the main result: hardware, dataset, baselines, command lines if available.", icon: "⚙" },
-];
 
 export function QuickActionChips({ onSummarize, onQuickAsk, disabled }: Props) {
   return (
@@ -27,7 +22,7 @@ export function QuickActionChips({ onSummarize, onQuickAsk, disabled }: Props) {
       >
         ⚡ Summarize
       </button>
-      {QUICK.map((q) => (
+      {QUICK_PROMPTS.map((q) => (
         <button
           key={q.label}
           onClick={() => onQuickAsk(q.prompt)}

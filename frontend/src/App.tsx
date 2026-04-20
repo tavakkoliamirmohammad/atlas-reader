@@ -1,4 +1,4 @@
-import { Routes, Route, Navigate } from "react-router-dom";
+import { Routes, Route, Navigate, useMatch } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { TopBar } from "./components/TopBar";
 import { AuroraBackground } from "./components/AuroraBackground";
@@ -49,11 +49,22 @@ export default function App() {
     }).catch(() => {});
   }, []);
 
+  const readerMatch = useMatch("/reader/:arxivId");
+  const onReaderRoute = !!readerMatch;
+
   useShortcut("[", () => useUiStore.getState().toggleLeft());
   useShortcut("]", () => useUiStore.getState().toggleRight());
   useShortcut("?", () => setShortcutsOpen((v) => !v));
   useShortcut("mod+k", () => setPaletteOpen((v) => !v));
   useShortcut("/", () => setSearchOpen((v) => !v));
+  useShortcut(
+    "s",
+    () => {
+      if (!onReaderRoute) return;
+      useUiStore.getState().requestSummarize();
+    },
+    [onReaderRoute],
+  );
   useShortcut("escape", () => {
     setShortcutsOpen(false);
     setPaletteOpen(false);
@@ -103,6 +114,10 @@ export default function App() {
           onSearch={() => {
             setPaletteOpen(false);
             setSearchOpen(true);
+          }}
+          onShowShortcuts={() => {
+            setPaletteOpen(false);
+            setShortcutsOpen(true);
           }}
         />
         <SearchPalette open={searchOpen} onClose={() => setSearchOpen(false)} />

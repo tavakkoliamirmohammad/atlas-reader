@@ -1,22 +1,48 @@
 import { Command } from "cmdk";
-import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useEffect, useRef, useState } from "react";
+import { useMatch, useNavigate } from "react-router-dom";
 import { useUiStore, type ReadingMode } from "@/stores/ui-store";
 import { PALETTES } from "@/lib/theme";
+import { QUICK_PROMPTS } from "@/lib/quick-prompts";
 
 type Paper = { arxiv_id: string; title: string };
 
-type Props = { open: boolean; onClose: () => void; onSearch?: () => void };
+type Props = {
+  open: boolean;
+  onClose: () => void;
+  onSearch?: () => void;
+  onShowShortcuts?: () => void;
+};
 
-export function CommandPalette({ open, onClose, onSearch }: Props) {
+export function CommandPalette({ open, onClose, onSearch, onShowShortcuts }: Props) {
   const [papers, setPapers] = useState<Paper[]>([]);
   const navigate = useNavigate();
   const setPalette = useUiStore((s) => s.setPalette);
   const setReadingMode = useUiStore((s) => s.setReadingMode);
+  const cycleReadingMode = useUiStore((s) => s.cycleReadingMode);
+  const toggleLeft = useUiStore((s) => s.toggleLeft);
+  const toggleRight = useUiStore((s) => s.toggleRight);
+  const requestSummarize = useUiStore((s) => s.requestSummarize);
+  const requestAsk = useUiStore((s) => s.requestAsk);
+
+  // Gate paper-scoped actions on whether the user is currently viewing a paper.
+  const readerMatch = useMatch("/reader/:arxivId");
+  const currentArxivId = readerMatch?.params.arxivId;
+
+  // Remember which element was focused so we can restore it on close — otherwise
+  // focus falls back to <body> and keyboard users lose their place.
+  const priorFocusRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     if (!open) return;
+    priorFocusRef.current = document.activeElement as HTMLElement | null;
     fetch("/api/digest").then((r) => r.json()).then((b) => setPapers(b.papers ?? [])).catch(() => setPapers([]));
+    return () => {
+      const prior = priorFocusRef.current;
+      if (prior && typeof prior.focus === "function" && document.contains(prior)) {
+        prior.focus();
+      }
+    };
   }, [open]);
 
   if (!open) return null;
@@ -43,6 +69,35 @@ export function CommandPalette({ open, onClose, onSearch }: Props) {
 
             <Command.Group heading="Actions">
               <Command.Item
+                value="summarize this paper"
+                disabled={!currentArxivId}
+                onSelect={() => {
+                  if (!currentArxivId) return;
+                  requestSummarize();
+                  onClose();
+                }}
+                className="cursor-pointer rounded px-2 py-2 text-sm text-zinc-200 aria-selected:bg-white/10 data-[disabled=true]:cursor-not-allowed data-[disabled=true]:opacity-40"
+              >
+                Summarize this paper
+                <span className="ml-2 font-mono text-xs text-zinc-500">s</span>
+              </Command.Item>
+              {QUICK_PROMPTS.map((q) => (
+                <Command.Item
+                  key={q.label}
+                  value={`ask ${q.label}`}
+                  disabled={!currentArxivId}
+                  onSelect={() => {
+                    if (!currentArxivId) return;
+                    requestAsk(q.prompt);
+                    onClose();
+                  }}
+                  className="cursor-pointer rounded px-2 py-2 text-sm text-zinc-200 aria-selected:bg-white/10 data-[disabled=true]:cursor-not-allowed data-[disabled=true]:opacity-40"
+                >
+                  <span aria-hidden className="mr-2 text-zinc-500">{q.icon}</span>
+                  Ask: {q.label}
+                </Command.Item>
+              ))}
+              <Command.Item
                 value="search papers full text"
                 onSelect={() => {
                   if (onSearch) onSearch();
@@ -52,6 +107,40 @@ export function CommandPalette({ open, onClose, onSearch }: Props) {
               >
                 Search papers (full text)
                 <span className="ml-2 font-mono text-xs text-zinc-500">/</span>
+              </Command.Item>
+              <Command.Item
+                value="toggle left panel"
+                onSelect={() => { toggleLeft(); onClose(); }}
+                className="cursor-pointer rounded px-2 py-2 text-sm text-zinc-200 aria-selected:bg-white/10"
+              >
+                Toggle left panel
+                <span className="ml-2 font-mono text-xs text-zinc-500">[</span>
+              </Command.Item>
+              <Command.Item
+                value="toggle right panel"
+                onSelect={() => { toggleRight(); onClose(); }}
+                className="cursor-pointer rounded px-2 py-2 text-sm text-zinc-200 aria-selected:bg-white/10"
+              >
+                Toggle right panel
+                <span className="ml-2 font-mono text-xs text-zinc-500">]</span>
+              </Command.Item>
+              <Command.Item
+                value="toggle reading mode cycle"
+                onSelect={() => { cycleReadingMode(); onClose(); }}
+                className="cursor-pointer rounded px-2 py-2 text-sm text-zinc-200 aria-selected:bg-white/10"
+              >
+                Toggle reading mode (light → sepia → dark)
+              </Command.Item>
+              <Command.Item
+                value="open shortcuts overlay help"
+                onSelect={() => {
+                  if (onShowShortcuts) onShowShortcuts();
+                  else onClose();
+                }}
+                className="cursor-pointer rounded px-2 py-2 text-sm text-zinc-200 aria-selected:bg-white/10"
+              >
+                Open Shortcuts overlay
+                <span className="ml-2 font-mono text-xs text-zinc-500">?</span>
               </Command.Item>
             </Command.Group>
 
