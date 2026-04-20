@@ -5,7 +5,6 @@ from __future__ import annotations
 import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
-from typing import List
 
 
 _NS = {"atom": "http://www.w3.org/2005/Atom"}
@@ -28,11 +27,14 @@ def _clean(text: str | None) -> str:
 
 def _arxiv_id_from_url(url: str) -> str:
     """http://arxiv.org/abs/2404.12345v1 -> 2404.12345"""
+    # Modern IDs (YYMM.NNNNN) split safely on "v"; old archive-prefix IDs
+    # (cs.PL/0506012) work by accident. If we ever need stricter parsing,
+    # switch to: re.sub(r"v\d+$", "", last)
     last = url.rsplit("/", 1)[-1]
     return last.split("v")[0]
 
 
-def parse_feed(xml_text: str) -> List[Paper]:
+def parse_feed(xml_text: str) -> list[Paper]:
     """Parse an arXiv Atom feed into a list of Paper records."""
     root = ET.fromstring(xml_text)
     out: list[Paper] = []

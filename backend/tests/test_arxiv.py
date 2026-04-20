@@ -14,6 +14,11 @@ def test_parse_returns_paper_dataclasses(fixtures_dir):
     assert p.categories == "cs.PL, cs.AR"
     assert p.published == "2026-04-18T08:00:00Z"
 
+    p2 = papers[1]
+    assert p2.arxiv_id == "2404.99999"
+    assert p2.authors == "Priya Singh"
+    assert p2.categories == "cs.PL"
+
 
 def test_parse_collapses_whitespace_in_title_and_abstract(fixtures_dir):
     xml_text = (fixtures_dir / "arxiv_sample.xml").read_text()
