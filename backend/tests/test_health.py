@@ -1,3 +1,4 @@
+import subprocess
 from unittest.mock import patch, MagicMock
 
 from app import health
@@ -17,4 +18,12 @@ def test_claude_available_returns_false_when_command_missing():
 def test_claude_available_returns_false_when_nonzero_exit():
     fake = MagicMock(returncode=1, stdout="", stderr="error")
     with patch("app.health.subprocess.run", return_value=fake):
+        assert health.claude_available() is False
+
+
+def test_claude_available_returns_false_when_command_times_out():
+    with patch(
+        "app.health.subprocess.run",
+        side_effect=subprocess.TimeoutExpired(cmd="claude", timeout=5),
+    ):
         assert health.claude_available() is False
