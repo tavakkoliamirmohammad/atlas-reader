@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
-import type { ModelChoice } from "@/lib/api";
+import type { HighlightColor, ModelChoice } from "@/lib/api";
 
 export type { ModelChoice };
 
@@ -17,6 +17,7 @@ type UiState = {
   rightCollapsed: boolean;
   readingMode: ReadingMode;
   model: ModelChoice;
+  lastHighlightColor: HighlightColor;
   // Ephemeral action dispatchers — NOT persisted. The action-id counters let
   // subscribers fire on each increment via a `useEffect(..., [id])`.
   summarizeRequestId: number;
@@ -27,6 +28,7 @@ type UiState = {
   toggleRight: () => void;
   setReadingMode: (m: ReadingMode) => void;
   setModel: (m: ModelChoice) => void;
+  setLastHighlightColor: (c: HighlightColor) => void;
   requestSummarize: () => void;
   requestAsk: (prompt: string) => void;
   cycleReadingMode: () => void;
@@ -43,6 +45,7 @@ export const useUiStore = create<UiState>()(
       rightCollapsed: false,
       readingMode: "light",
       model: "sonnet",
+      lastHighlightColor: "yellow",
       summarizeRequestId: 0,
       askRequest: null,
       setPalette: (id) => set({ paletteId: id }),
@@ -51,6 +54,7 @@ export const useUiStore = create<UiState>()(
       toggleRight: () => set((s) => ({ rightCollapsed: !s.rightCollapsed })),
       setReadingMode: (m) => set({ readingMode: m }),
       setModel: (m) => set({ model: m }),
+      setLastHighlightColor: (c) => set({ lastHighlightColor: c }),
       requestSummarize: () => set((s) => ({ summarizeRequestId: s.summarizeRequestId + 1 })),
       requestAsk: (prompt) =>
         set((s) => ({
@@ -74,6 +78,7 @@ export const useUiStore = create<UiState>()(
         rightCollapsed: s.rightCollapsed,
         readingMode: s.readingMode,
         model: s.model,
+        lastHighlightColor: s.lastHighlightColor,
       }),
     },
   ),

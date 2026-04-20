@@ -1,13 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { useMatch } from "react-router-dom";
 import { ChevronDown, ChevronRight, Plus, X } from "lucide-react";
-import {
-  type Highlight,
-  type HighlightColor,
-  createHighlight,
-  deleteHighlight,
-  fetchHighlights,
-} from "@/lib/api";
+import { type HighlightColor } from "@/lib/api";
 import { useHighlightsContext } from "./PaperReader";
 
 const COLORS: { id: HighlightColor; label: string; swatch: string; bar: string }[] = [
@@ -43,12 +36,9 @@ function looksSuspicious(text: string): boolean {
 const BANNER_AUTO_DISMISS_MS = 3000;
 
 export function HighlightsPanel() {
-  const match = useMatch("/reader/:arxivId");
-  const arxivId = match?.params.arxivId;
   const ctx = useHighlightsContext();
 
   const [open, setOpen] = useState(false);
-  const [items, setItems] = useState<Highlight[]>([]);
   const [adding, setAdding] = useState(false);
   const [draftQuote, setDraftQuote] = useState("");
   const [draftColor, setDraftColor] = useState<HighlightColor>("yellow");
@@ -56,19 +46,6 @@ export function HighlightsPanel() {
   const [clipboardBanner, setClipboardBanner] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const bannerTimerRef = useRef<number | null>(null);
-
-  useEffect(() => {
-    if (ctx) return;          // context owns loading; no double-fetch
-    if (!arxivId) {
-      setItems([]);
-      return;
-    }
-    let alive = true;
-    fetchHighlights(arxivId)
-      .then((rows) => { if (alive) setItems(rows); })
-      .catch(() => { if (alive) setItems([]); });
-    return () => { alive = false; };
-  }, [arxivId, ctx]);
 
   useEffect(() => {
     if (!adding) {
@@ -109,36 +86,15 @@ export function HighlightsPanel() {
     };
   }, []);
 
-  if (!arxivId) return null;
-
-  const displayItems = ctx?.items ?? items;
+  if (!ctx) return null;
+  const { items, onAdd, onDelete, onJump } = ctx;
 
   async function save() {
-    if (!arxivId) return;
     const quote = draftQuote.trim();
     if (!quote || saving) return;
     setSaving(true);
     try {
-      if (ctx) {
-        // Context path: PaperReader owns the list; don't touch local state.
-        await ctx.onAdd({ quote, color: draftColor });
-      } else {
-        const id = await createHighlight(arxivId, { quote, color: draftColor });
-        // Optimistic prepend; matches backend "newest first" ordering.
-        setItems((prev) => [
-          {
-            id,
-            arxiv_id: arxivId,
-            quote,
-            color: draftColor,
-            page: null,
-            note: null,
-            rects: null,
-            created_at: new Date().toISOString(),
-          },
-          ...prev,
-        ]);
-      }
+      await onAdd({ quote, color: draftColor });
       setDraftQuote("");
       setDraftColor("yellow");
       setAdding(false);
@@ -150,17 +106,10 @@ export function HighlightsPanel() {
   }
 
   async function remove(id: number) {
-    if (ctx) {
-      await ctx.onDelete(id);
-      return;
-    }
-    const prev = items;
-    setItems((cur) => cur.filter((h) => h.id !== id));
     try {
-      await deleteHighlight(id);
+      await onDelete(id);
     } catch {
-      // restore on failure
-      setItems(prev);
+      // parent handles rollback
     }
   }
 
@@ -179,8 +128,8 @@ export function HighlightsPanel() {
           <span className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold">
             Highlights
           </span>
-          {displayItems.length > 0 && (
-            <span className="text-[10px] text-slate-500 font-mono">{displayItems.length}</span>
+          {items.length > 0 && (
+            <span className="text-[10px] text-slate-500 font-mono">{items.length}</span>
           )}
         </span>
         <span
@@ -293,13 +242,13 @@ export function HighlightsPanel() {
             </div>
           )}
 
-          {displayItems.length === 0 && !adding && (
+          {items.length === 0 && !adding && (
             <div className="text-[11px] text-slate-500 px-1 py-2 leading-relaxed">
               Click + to add a highlight.
             </div>
           )}
 
-          {displayItems.map((h) => (
+          {items.map((h) => (
             <div
               key={h.id}
               className="group relative rounded-md bg-white/[0.02] hover:bg-white/[0.04] pl-2.5 pr-7 py-1.5 transition-colors"
@@ -308,9 +257,9 @@ export function HighlightsPanel() {
               <button
                 type="button"
                 onClick={() => {
-                  if (ctx && h.page != null) ctx.onJump(h.page);
+                  if (h.page != null) onJump(h.page);
                 }}
-                disabled={!ctx || h.page == null}
+                disabled={h.page == null}
                 title={h.quote}
                 className="block w-full text-left text-[12px] text-slate-200 leading-snug overflow-hidden bg-transparent border-0 p-0 m-0 disabled:cursor-default enabled:cursor-pointer"
                 style={{

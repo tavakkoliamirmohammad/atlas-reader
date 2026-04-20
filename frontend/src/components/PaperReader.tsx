@@ -66,6 +66,8 @@ export function HighlightsProvider({
 export function PaperReader({ arxivId }: Props) {
   const [, setPaper] = useState<Paper | null>(null);
   const mode = useUiStore((s) => s.readingMode);
+  const defaultHighlightColor = useUiStore((s) => s.lastHighlightColor);
+  const setLastHighlightColor = useUiStore((s) => s.setLastHighlightColor);
   const [items, setItems] = useState<Highlight[]>([]);
   const [selection, setSelection] = useState<SelectionPayload | null>(null);
   const jumpRef = useRef<((pageNumber: number) => void) | null>(null);
@@ -108,14 +110,17 @@ export function PaperReader({ arxivId }: Props) {
   );
 
   const onDelete = useCallback(async (id: number) => {
-    const prev = items;
-    setItems((cur) => cur.filter((h) => h.id !== id));
+    let prev: Highlight[] | null = null;
+    setItems((cur) => {
+      prev = cur;
+      return cur.filter((h) => h.id !== id);
+    });
     try {
       await deleteHighlight(id);
     } catch {
-      setItems(prev);
+      if (prev) setItems(prev);
     }
-  }, [items]);
+  }, []);
 
   const onJump = useCallback((page: number) => {
     jumpRef.current?.(page);
@@ -151,6 +156,7 @@ export function PaperReader({ arxivId }: Props) {
           page: selection.page,
           rects: selection.rects,
         });
+        setLastHighlightColor(color);
         setSelection(null);
         window.getSelection()?.removeAllRanges();
       } catch (err) {
@@ -158,7 +164,7 @@ export function PaperReader({ arxivId }: Props) {
         console.error("[Atlas] failed to save highlight:", err);
       }
     },
-    [selection, onAdd],
+    [selection, onAdd, setLastHighlightColor],
   );
 
   const askFromSelection = useCallback(() => {
@@ -186,7 +192,7 @@ export function PaperReader({ arxivId }: Props) {
             jumpRef={jumpRef}
             onHighlightSave={saveFromSelection}
             onHighlightAsk={askFromSelection}
-            defaultHighlightColor="yellow"
+            defaultHighlightColor={defaultHighlightColor}
           />
         </div>
       </div>
