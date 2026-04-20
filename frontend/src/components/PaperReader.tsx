@@ -20,6 +20,13 @@ import {
 } from "@/lib/api";
 import { useUiStore } from "@/stores/ui-store";
 import { PdfPage } from "./PdfPage";
+import type { HighlightWithPosition, SelectionPayload } from "./PdfViewport";
+
+const OVERLAY_COLORS: Record<HighlightColor, string> = {
+  yellow: "rgba(250,204,21,0.35)",
+  coral:  "rgba(251,113,133,0.35)",
+  blue:   "rgba(96,165,250,0.35)",
+};
 
 type Props = { arxivId: string };
 
@@ -60,6 +67,7 @@ export function PaperReader({ arxivId }: Props) {
   const [, setPaper] = useState<Paper | null>(null);
   const mode = useUiStore((s) => s.readingMode);
   const [items, setItems] = useState<Highlight[]>([]);
+  const [selection, setSelection] = useState<SelectionPayload | null>(null);
   const jumpRef = useRef<((pageNumber: number) => void) | null>(null);
 
   useEffect(() => {
@@ -118,6 +126,47 @@ export function PaperReader({ arxivId }: Props) {
     [arxivId, items, onAdd, onDelete, onJump],
   );
 
+  const overlayHighlights: HighlightWithPosition[] = useMemo(
+    () =>
+      items.flatMap((h) =>
+        h.rects && h.page != null
+          ? [{
+              id: h.id,
+              page: h.page,
+              color: OVERLAY_COLORS[h.color],
+              rects: h.rects,
+            }]
+          : [],
+      ),
+    [items],
+  );
+
+  const saveFromSelection = useCallback(
+    async (color: HighlightColor) => {
+      if (!selection) return;
+      await onAdd({
+        quote: selection.text,
+        color,
+        page: selection.page,
+        rects: selection.rects,
+      });
+      setSelection(null);
+      window.getSelection()?.removeAllRanges();
+    },
+    [selection, onAdd],
+  );
+
+  const askFromSelection = useCallback(() => {
+    if (!selection) return;
+    // Task 6 will wire this to the pinned-quote store. For now: stub.
+    console.info("[SelectionToolbar] ask about selection", {
+      quote: selection.text,
+      page: selection.page,
+    });
+    setSelection(null);
+    window.getSelection()?.removeAllRanges();
+  }, [selection]);
+
   return (
     <HighlightsProvider value={contextValue}>
       <div className="flex flex-col h-full">
@@ -126,6 +175,13 @@ export function PaperReader({ arxivId }: Props) {
             fileUrl={api.pdfUrl(arxivId)}
             mode={mode}
             arxivId={arxivId}
+            highlights={overlayHighlights}
+            selection={selection}
+            onSelection={setSelection}
+            jumpRef={jumpRef}
+            onHighlightSave={saveFromSelection}
+            onHighlightAsk={askFromSelection}
+            defaultHighlightColor="yellow"
           />
         </div>
       </div>

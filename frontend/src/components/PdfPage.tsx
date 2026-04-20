@@ -1,8 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Sun, Book, Moon } from "lucide-react";
 import { useUiStore, type ReadingMode } from "@/stores/ui-store";
+import type { HighlightColor } from "@/lib/api";
 import { ReadingProgressRail, type RailSection } from "./ReadingProgressRail";
-import { PdfViewport } from "./PdfViewport";
+import {
+  PdfViewport,
+  type HighlightWithPosition,
+  type SelectionPayload,
+} from "./PdfViewport";
+import { SelectionToolbar } from "./SelectionToolbar";
 
 /**
  * The arXiv ID pill in the floating toolbar. Click copies `arxiv:{id}` to the
@@ -71,6 +77,13 @@ type Props = {
   fileUrl: string;
   mode: ReadingMode;
   arxivId?: string;
+  highlights?: HighlightWithPosition[];
+  selection?: SelectionPayload | null;
+  onSelection?: (p: SelectionPayload | null) => void;
+  jumpRef?: React.MutableRefObject<((n: number) => void) | null>;
+  onHighlightSave?: (color: HighlightColor) => Promise<void>;
+  onHighlightAsk?: () => void;
+  defaultHighlightColor?: HighlightColor;
 };
 
 // Soft radial-gradient backdrops — slightly tinted center, fading to ink
@@ -91,13 +104,25 @@ const MODES: { id: ReadingMode; label: string; Icon: typeof Sun }[] = [
   { id: "dark",  label: "Dark",  Icon: Moon },
 ];
 
-export function PdfPage({ fileUrl, mode, arxivId }: Props) {
+export function PdfPage({
+  fileUrl,
+  mode,
+  arxivId,
+  highlights,
+  selection,
+  onSelection,
+  jumpRef: externalJumpRef,
+  onHighlightSave,
+  onHighlightAsk,
+  defaultHighlightColor = "yellow",
+}: Props) {
   const setMode = useUiStore((s) => s.setReadingMode);
   const [toolbarVisible, setToolbarVisible] = useState(true);
   const hideTimer = useRef<number | null>(null);
   const cardRef = useRef<HTMLDivElement | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
-  const jumpRef = useRef<((pageNumber: number) => void) | null>(null);
+  const internalJumpRef = useRef<((pageNumber: number) => void) | null>(null);
+  const jumpRef = externalJumpRef ?? internalJumpRef;
 
   const [progress, setProgress] = useState<{
     current: number;
@@ -237,8 +262,34 @@ export function PdfPage({ fileUrl, mode, arxivId }: Props) {
           jumpRef={jumpRef}
           onProgress={onProgress}
           onSections={setSections}
+          onSelection={onSelection}
+          highlights={highlights}
         />
       </div>
+
+      {/* Floating selection toolbar — pinned above the last selection rect. */}
+      {selection && selection.rects.length > 0 && onHighlightSave && onHighlightAsk && (() => {
+        const scrollEl = scrollContainerRef.current;
+        const pageEl = scrollEl?.querySelector(
+          `.pdf-page[data-page="${selection.page}"]`,
+        ) as HTMLElement | null;
+        const cardRect = cardRef.current?.getBoundingClientRect();
+        if (!scrollEl || !pageEl || !cardRect) return null;
+        const pageRect = pageEl.getBoundingClientRect();
+        const last = selection.rects[selection.rects.length - 1];
+        const centerX =
+          pageRect.left - cardRect.left + (last.x + last.width / 2) * pageRect.width;
+        const topY = pageRect.top - cardRect.top + last.y * pageRect.height;
+        return (
+          <SelectionToolbar
+            left={centerX}
+            top={Math.max(topY - 6, 12)}
+            color={defaultHighlightColor}
+            onHighlight={(color) => void onHighlightSave(color)}
+            onAsk={onHighlightAsk}
+          />
+        );
+      })()}
 
       {/* Floating auto-hiding toolbar over the top edge */}
       <div
