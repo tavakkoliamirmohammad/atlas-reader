@@ -3,7 +3,7 @@ import { useEffect } from "react";
 import { TopBar } from "./components/TopBar";
 import { AuroraBackground } from "./components/AuroraBackground";
 import { PaperList } from "./components/PaperList";
-import { ReaderOnlyCta } from "./components/ReaderOnlyCta";
+import { RightPanel } from "./components/RightPanel";
 import { ReopenTab } from "./components/ReopenTab";
 import { IndexRoute } from "./routes/IndexRoute";
 import { ReaderRoute } from "./routes/ReaderRoute";
@@ -53,7 +53,7 @@ export default function App() {
 
         <aside className={["glass-panel relative border-l border-white/5 overflow-hidden transition-opacity flex flex-col",
                            rightCollapsed ? "opacity-0 pointer-events-none" : ""].join(" ")}>
-          <ReaderOnlyCta />
+          <RightPanel />
         </aside>
       </div>
     </div>
