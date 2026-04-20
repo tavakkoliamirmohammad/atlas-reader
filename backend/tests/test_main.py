@@ -71,21 +71,47 @@ async def test_get_paper_returns_row_when_found(atlas_data_dir):
 @pytest.mark.asyncio
 async def test_get_paper_returns_404_when_missing(atlas_data_dir):
     db.init()
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
-        r = await c.get("/api/papers/missing")
+    with patch("app.main.arxiv.fetch_by_id", new=AsyncMock(return_value=None)):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            r = await c.get("/api/papers/missing")
     assert r.status_code == 404
 
 
 @pytest.mark.asyncio
-async def test_get_pdf_returns_cached_bytes(atlas_data_dir, fixtures_dir):
+async def test_get_pdf_streams_from_arxiv(atlas_data_dir, fixtures_dir):
     db.init()
     papers.upsert([Paper("44", "T", "A", "x", "cs.PL", "2026-04-19T08:00:00Z")])
     pdf_bytes = (fixtures_dir / "tiny.pdf").read_bytes()
-    target = atlas_data_dir / "pdfs" / "44.pdf"
-    target.write_bytes(pdf_bytes)
 
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
-        r = await c.get("/api/pdf/44")
+    from contextlib import asynccontextmanager
+
+    class _FakeResp:
+        def raise_for_status(self):
+            pass
+
+        async def aiter_bytes(self, chunk_size=64 * 1024):
+            yield pdf_bytes
+
+    @asynccontextmanager
+    async def _fake_stream(self, method, url):
+        yield _FakeResp()
+
+    class _FakeClient:
+        def __init__(self, *a, **kw):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return None
+
+        stream = _fake_stream
+
+    with patch("app.main.httpx.AsyncClient", _FakeClient):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            r = await c.get("/api/pdf/44")
+
     assert r.status_code == 200
     assert r.headers["content-type"] == "application/pdf"
     assert r.content == pdf_bytes
@@ -94,8 +120,9 @@ async def test_get_pdf_returns_cached_bytes(atlas_data_dir, fixtures_dir):
 @pytest.mark.asyncio
 async def test_get_pdf_returns_404_when_paper_missing(atlas_data_dir):
     db.init()
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
-        r = await c.get("/api/pdf/nope")
+    with patch("app.main.arxiv.fetch_by_id", new=AsyncMock(return_value=None)):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            r = await c.get("/api/pdf/nope")
     assert r.status_code == 404
 
 
@@ -163,9 +190,10 @@ async def test_get_paper_records_open_event(atlas_data_dir):
 @pytest.mark.asyncio
 async def test_get_paper_missing_does_not_log_event(atlas_data_dir):
     db.init()
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
-        await c.get("/api/papers/does-not-exist")
-        r = await c.get("/api/stats")
+    with patch("app.main.arxiv.fetch_by_id", new=AsyncMock(return_value=None)):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            await c.get("/api/papers/does-not-exist")
+            r = await c.get("/api/stats")
     assert r.json()["papers_today"] == 0
 
 

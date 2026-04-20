@@ -1,3 +1,5 @@
+from contextlib import asynccontextmanager
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 from unittest.mock import AsyncMock, patch
@@ -15,14 +17,31 @@ async def test_full_round_trip_health_digest_paper_pdf(atlas_data_dir, fixtures_
     other: list[Paper] = []
     pdf_bytes = (fixtures_dir / "tiny.pdf").read_bytes()
 
-    fake_pdf_resp = AsyncMock()
-    fake_pdf_resp.content = pdf_bytes
-    fake_pdf_resp.raise_for_status = lambda: None
+    class _FakeResp:
+        def raise_for_status(self):
+            pass
+
+        async def aiter_bytes(self, chunk_size=64 * 1024):
+            yield pdf_bytes
+
+    @asynccontextmanager
+    async def _fake_stream(self, method, url):
+        yield _FakeResp()
+
+    class _FakeClient:
+        def __init__(self, *a, **kw):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return None
+
+        stream = _fake_stream
 
     with patch("app.digest.arxiv.fetch_recent", new=AsyncMock(side_effect=[pl, other])):
-        with patch("app.pdf_cache.httpx.AsyncClient") as MockClient:
-            instance = MockClient.return_value.__aenter__.return_value
-            instance.get = AsyncMock(return_value=fake_pdf_resp)
+        with patch("app.main.httpx.AsyncClient", _FakeClient):
             with patch("app.main.health.claude_available", return_value=False):
                 async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
                     h = await c.get("/api/health")
