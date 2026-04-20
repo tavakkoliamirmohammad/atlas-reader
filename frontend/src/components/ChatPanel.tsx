@@ -95,6 +95,8 @@ export function ChatPanel() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [streaming, setStreaming] = useState(false);
   const [draft, setDraft] = useState("");
+  const [summarizeStartedAt, setSummarizeStartedAt] = useState<number | null>(null);
+  const [nowMs, setNowMs] = useState<number>(() => Date.now());
   const abortRef = useRef<AbortController | null>(null);
   const model = useUiStore((s) => s.model);
   const setModel = useUiStore((s) => s.setModel);
@@ -107,6 +109,21 @@ export function ChatPanel() {
     setMessages([]);
     return () => { abortRef.current?.abort(); };
   }, [arxivId]);
+
+  // Clear the summarize elapsed-timer the moment streaming stops.
+  useEffect(() => {
+    if (!streaming && summarizeStartedAt !== null) {
+      setSummarizeStartedAt(null);
+    }
+  }, [streaming, summarizeStartedAt]);
+
+  // Tick at 1Hz while a summarize is in flight so the chip can show live seconds.
+  useEffect(() => {
+    if (summarizeStartedAt === null) return;
+    setNowMs(Date.now());
+    const iv = window.setInterval(() => setNowMs(Date.now()), 1000);
+    return () => window.clearInterval(iv);
+  }, [summarizeStartedAt]);
 
   // External summarize trigger — fires when command-palette or `s` shortcut
   // increments summarizeRequestId. Skip the initial 0 so we don't auto-fire.
@@ -173,6 +190,7 @@ export function ChatPanel() {
     if (!arxivId || streaming) return;
     setMessages((m) => [...m, { role: "assistant", content: "", model }]);
     setStreaming(true);
+    setSummarizeStartedAt(Date.now());
     abortRef.current = new AbortController();
     try {
       await streamSummary(arxivId, {
@@ -194,7 +212,14 @@ export function ChatPanel() {
       <Glossary arxivId={arxivId} />
       <div className="px-3 py-2.5 border-b border-white/5">
         <div className="text-[10px] uppercase tracking-wider text-slate-500 mb-1.5">Quick actions</div>
-        <QuickActionChips onSummarize={summarize} onQuickAsk={quickAsk} disabled={streaming} />
+        <QuickActionChips
+          onSummarize={summarize}
+          onQuickAsk={quickAsk}
+          disabled={streaming}
+          summarizeElapsedMs={
+            summarizeStartedAt !== null ? nowMs - summarizeStartedAt : null
+          }
+        />
       </div>
       <div className="flex-1 overflow-y-auto px-3 py-3 flex flex-col gap-2">
         {messages.length === 0 && !streaming && (

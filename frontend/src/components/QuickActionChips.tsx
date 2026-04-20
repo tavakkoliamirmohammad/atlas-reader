@@ -4,15 +4,32 @@ type Props = {
   onSummarize: () => void;
   onQuickAsk: (prompt: string) => void;
   disabled?: boolean;
+  /**
+   * When non-null, the Summarize chip swaps its label to a live
+   * "Summarizing 4s…" indicator. Used while a streaming summary is in flight.
+   */
+  summarizeElapsedMs?: number | null;
 };
 
-export function QuickActionChips({ onSummarize, onQuickAsk, disabled }: Props) {
+function formatElapsed(ms: number): string {
+  return `${Math.floor(ms / 1000)}s`;
+}
+
+export function QuickActionChips({
+  onSummarize,
+  onQuickAsk,
+  disabled,
+  summarizeElapsedMs,
+}: Props) {
+  const showElapsed =
+    typeof summarizeElapsedMs === "number" && summarizeElapsedMs >= 2000;
   return (
     <div className="flex flex-wrap gap-1.5">
       <button
         onClick={onSummarize}
         disabled={disabled}
         aria-label="Generate deep summary"
+        aria-live="polite"
         className="px-3 py-1.5 rounded-full text-[11px] font-semibold cursor-pointer disabled:opacity-50 transition-all hover:translate-y-[-1px] shimmer"
         style={{
           background: "var(--user-grad)",
@@ -20,7 +37,9 @@ export function QuickActionChips({ onSummarize, onQuickAsk, disabled }: Props) {
           boxShadow: "0 0 0 1px var(--ac1-mid), 0 6px 18px -4px var(--ac1-strong)",
         }}
       >
-        ⚡ Summarize
+        {showElapsed
+          ? `⚡ Summarizing ${formatElapsed(summarizeElapsedMs as number)}…`
+          : "⚡ Summarize"}
       </button>
       {QUICK_PROMPTS.map((q) => (
         <button
