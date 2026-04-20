@@ -1,9 +1,0 @@
-README.md
-pyproject.toml
-backend/app/__init__.py
-backend/atlas.egg-info/PKG-INFO
-backend/atlas.egg-info/SOURCES.txt
-backend/atlas.egg-info/dependency_links.txt
-backend/atlas.egg-info/entry_points.txt
-backend/atlas.egg-info/requires.txt
-backend/atlas.egg-info/top_level.txt
