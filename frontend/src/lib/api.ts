@@ -121,3 +121,78 @@ export async function createThread(arxivId: string, title: string): Promise<Thre
   const body = await r.json();
   return { id: body.id, arxiv_id: body.arxiv_id, title: body.title, created_at: null };
 }
+
+export type HighlightColor = "yellow" | "coral" | "blue";
+
+export type Highlight = {
+  id: number;
+  arxiv_id: string;
+  quote: string;
+  color: HighlightColor;
+  page: number | null;
+  note: string | null;
+  created_at: string | null;
+};
+
+export async function fetchHighlights(arxivId: string): Promise<Highlight[]> {
+  const r = await fetch(`/api/highlights/${encodeURIComponent(arxivId)}`);
+  if (!r.ok) throw new Error(`/api/highlights/${arxivId} -> ${r.status}`);
+  const body = await r.json();
+  return body.highlights as Highlight[];
+}
+
+export async function createHighlight(
+  arxivId: string,
+  input: { quote: string; color: HighlightColor; page?: number | null; note?: string | null },
+): Promise<number> {
+  const r = await fetch(`/api/highlights/${encodeURIComponent(arxivId)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!r.ok) throw new Error(`POST /api/highlights/${arxivId} -> ${r.status}`);
+  const body = await r.json();
+  return body.id as number;
+}
+
+export async function deleteHighlight(id: number): Promise<void> {
+  const r = await fetch(`/api/highlights/${id}`, { method: "DELETE" });
+  if (!r.ok && r.status !== 204) throw new Error(`DELETE /api/highlights/${id} -> ${r.status}`);
+}
+
+export type GlossaryTerm = {
+  id: number;
+  arxiv_id: string;
+  term: string;
+  definition: string | null;
+  created_at: string | null;
+};
+
+export async function fetchGlossary(arxivId: string): Promise<GlossaryTerm[]> {
+  const r = await fetch(`/api/glossary/${encodeURIComponent(arxivId)}`);
+  if (!r.ok) throw new Error(`/api/glossary/${arxivId} -> ${r.status}`);
+  const body = await r.json();
+  return body.terms as GlossaryTerm[];
+}
+
+export async function extractGlossary(arxivId: string): Promise<GlossaryTerm[]> {
+  const r = await fetch(
+    `/api/glossary/${encodeURIComponent(arxivId)}/extract`,
+    { method: "POST" },
+  );
+  if (!r.ok) throw new Error(`POST /api/glossary/${arxivId}/extract -> ${r.status}`);
+  const body = await r.json();
+  return body.terms as GlossaryTerm[];
+}
+
+export async function fetchGlossaryDefinition(
+  arxivId: string,
+  term: string,
+): Promise<string> {
+  const r = await fetch(
+    `/api/glossary/${encodeURIComponent(arxivId)}/${encodeURIComponent(term)}/definition`,
+  );
+  if (!r.ok) throw new Error(`definition ${r.status}`);
+  const body = await r.json();
+  return body.definition as string;
+}

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Sun, Book, Moon } from "lucide-react";
 import { useUiStore, type ReadingMode } from "@/stores/ui-store";
+import { ReadingProgressRail } from "./ReadingProgressRail";
 
 type Props = {
   fileUrl: string;
@@ -51,27 +52,38 @@ export function PdfPage({ fileUrl, mode, arxivId }: Props) {
       }, HIDE_AFTER_MS);
     };
 
-    const onMove = (e: MouseEvent) => {
+    // Watch document-level pointer movement so we still detect "mouse near top of card"
+    // even though the iframe captures its own mouse events. Whenever the pointer is
+    // anywhere over the card's hit-box, we treat it as activity and (re)show the toolbar.
+    const onDocMove = (e: MouseEvent) => {
       const rect = card.getBoundingClientRect();
-      const yFromTop = e.clientY - rect.top;
-      // show if mouse is in upper 25% (or anywhere if already visible & moving)
-      if (yFromTop < rect.height * 0.25) {
+      const inside =
+        e.clientX >= rect.left &&
+        e.clientX <= rect.right &&
+        e.clientY >= rect.top &&
+        e.clientY <= rect.bottom;
+      if (inside) {
         setToolbarVisible(true);
+        scheduleHide();
       }
-      scheduleHide();
     };
 
-    const onLeave = () => {
+    // The iframe absorbs mouse events when the cursor is over it. Use 'mouseenter' on
+    // the iframe (which DOES fire on the parent before transfer) plus a 'focus' poll
+    // via window 'blur' to know we're inside the iframe area.
+    const onIframeOver = () => {
+      setToolbarVisible(true);
       scheduleHide();
     };
+    const iframe = card.querySelector("iframe");
+    iframe?.addEventListener("mouseenter", onIframeOver);
 
-    card.addEventListener("mousemove", onMove);
-    card.addEventListener("mouseleave", onLeave);
+    document.addEventListener("mousemove", onDocMove);
     scheduleHide();
 
     return () => {
-      card.removeEventListener("mousemove", onMove);
-      card.removeEventListener("mouseleave", onLeave);
+      document.removeEventListener("mousemove", onDocMove);
+      iframe?.removeEventListener("mouseenter", onIframeOver);
       if (hideTimer.current !== null) {
         window.clearTimeout(hideTimer.current);
       }
@@ -113,6 +125,15 @@ export function PdfPage({ fileUrl, mode, arxivId }: Props) {
           opacity: 0.5,
         }}
       />
+
+      {/* Reading-progress rail — sits on the left edge of the card.
+          NOTE: Currently the PDF is rendered via a same-origin <iframe>, so the
+          host page cannot observe scroll position or extract the PDF outline.
+          The rail therefore renders as a static decoration. When the reader is
+          migrated to <PDFViewer /> from @embedpdf/react-pdf-viewer, pass its
+          `onReady(registry)` here to light up real page progress + section
+          markers. */}
+      <ReadingProgressRail registry={null} />
 
       {/* The actual document — floats over the gradient with a 2px accent ring */}
       <div

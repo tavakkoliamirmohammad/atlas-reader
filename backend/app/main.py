@@ -20,10 +20,12 @@ from app import (
     conversations,
     db,
     digest,
+    glossary,
     health,
     highlights,
     papers,
     pdf_cache,
+    search,
     stats,
     summarizer,
 )
@@ -154,7 +156,8 @@ async def post_ask(
     arxiv_id: str,
     body: AskBody,
     model: str | None = None,
-    thread_id: int = 1,
+    thread_id: int = 1,  # noqa: ARG001 - accepted for forward-compat with the
+    # multi-thread UI; asker is currently ephemeral so no DB write happens here.
 ):
     if papers.get(arxiv_id) is None:
         raise HTTPException(status_code=404, detail="paper not found")
@@ -164,13 +167,7 @@ async def post_ask(
 
     async def gen():
         try:
-            async for chunk in asker.ask(
-                arxiv_id,
-                body.question,
-                body.history,
-                model=chosen,
-                thread_id=thread_id,
-            ):
+            async for chunk in asker.ask(arxiv_id, body.question, body.history, model=chosen):
                 yield _sse_format(chunk)
             yield b"event: done\ndata: ok\n\n"
         except Exception as exc:
@@ -276,6 +273,43 @@ async def delete_highlight(highlight_id: int) -> Response:
     if not highlights.delete(highlight_id):
         raise HTTPException(status_code=404, detail="highlight not found")
     return Response(status_code=204)
+
+
+@app.get("/api/glossary/{arxiv_id}")
+async def get_glossary(arxiv_id: str) -> dict:
+    rows = glossary.list_for(arxiv_id)
+    return {"terms": [_row_to_dict(r) for r in rows]}
+
+
+@app.post("/api/glossary/{arxiv_id}/extract")
+async def post_glossary_extract(arxiv_id: str) -> dict:
+    if papers.get(arxiv_id) is None:
+        raise HTTPException(status_code=404, detail="paper not found")
+    try:
+        terms = await glossary.extract_terms(arxiv_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="paper not found")
+    rows = glossary.list_for(arxiv_id)
+    return {"extracted": terms, "terms": [_row_to_dict(r) for r in rows]}
+
+
+@app.get("/api/glossary/{arxiv_id}/{term}/definition")
+async def get_glossary_definition(arxiv_id: str, term: str) -> dict:
+    if papers.get(arxiv_id) is None:
+        raise HTTPException(status_code=404, detail="paper not found")
+    try:
+        text = await glossary.define(arxiv_id, term)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="paper not found")
+    return {"term": term, "definition": text}
+
+
+@app.get("/api/search")
+async def get_search(q: str = "", limit: int = 20) -> dict:
+    """Full-text search across cached papers (title, authors, abstract, categories)."""
+    capped = max(1, min(int(limit), 100))
+    results = search.search(q, limit=capped)
+    return {"count": len(results), "results": results}
 
 
 def _frontend_dist() -> Path | None:
