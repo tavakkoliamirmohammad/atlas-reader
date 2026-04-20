@@ -1,4 +1,4 @@
-"""`atlas` CLI: start, stop, status, logs, open."""
+"""`atlas` CLI: start, stop, status, logs, open, up, restart."""
 
 from __future__ import annotations
 
@@ -7,6 +7,9 @@ import os
 import signal
 import subprocess
 import sys
+import time
+import urllib.error
+import urllib.request
 import webbrowser
 from pathlib import Path
 from typing import Optional, Sequence
@@ -15,6 +18,41 @@ from app import db
 
 
 PORT = 8765
+
+
+def _project_root() -> Path:
+    return Path(__file__).resolve().parents[2]
+
+
+def _frontend_dir() -> Path:
+    return _project_root() / "frontend"
+
+
+def _wait_for_health(timeout: float = 10.0) -> bool:
+    deadline = time.time() + timeout
+    url = f"http://localhost:{PORT}/api/health"
+    while time.time() < deadline:
+        try:
+            with urllib.request.urlopen(url, timeout=1) as r:
+                if r.status == 200:
+                    return True
+        except (urllib.error.URLError, ConnectionError, OSError):
+            pass
+        time.sleep(0.2)
+    return False
+
+
+def _build_frontend() -> int:
+    fd = _frontend_dir()
+    if not (fd / "package.json").exists():
+        print("no frontend/ directory; skipping build")
+        return 0
+    pm = "pnpm" if subprocess.run(["which", "pnpm"], capture_output=True).returncode == 0 else "npm"
+    print(f"building frontend ({pm} build)...")
+    res = subprocess.run([pm, "run", "build"], cwd=fd)
+    if res.returncode != 0:
+        print(f"frontend build failed (exit {res.returncode})", file=sys.stderr)
+    return res.returncode
 
 
 def _pid_file() -> Path:
@@ -96,18 +134,46 @@ def cmd_open() -> int:
     return 0
 
 
+def cmd_restart() -> int:
+    cmd_stop()
+    time.sleep(0.5)
+    return cmd_start()
+
+
+def cmd_up() -> int:
+    """Build frontend + start backend + wait for health + open browser."""
+    rc = _build_frontend()
+    if rc != 0:
+        return rc
+    if (pid := _read_pid()) and _is_alive(pid):
+        print(f"backend already running (pid {pid}); restarting to pick up changes")
+        cmd_stop()
+        time.sleep(0.5)
+    cmd_start()
+    if _wait_for_health():
+        print(f"ready: http://localhost:{PORT}")
+        webbrowser.open(f"http://localhost:{PORT}")
+    else:
+        print(f"server didn't respond on http://localhost:{PORT} within 10s; check `atlas logs`",
+              file=sys.stderr)
+        return 1
+    return 0
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(prog="atlas")
     sub = parser.add_subparsers(dest="cmd", required=True)
-    for name in ("start", "stop", "status", "logs", "open"):
+    for name in ("start", "stop", "status", "logs", "open", "restart", "up"):
         sub.add_parser(name)
     args = parser.parse_args(argv)
     return {
-        "start":  cmd_start,
-        "stop":   cmd_stop,
-        "status": cmd_status,
-        "logs":   cmd_logs,
-        "open":   cmd_open,
+        "start":   cmd_start,
+        "stop":    cmd_stop,
+        "status":  cmd_status,
+        "logs":    cmd_logs,
+        "open":    cmd_open,
+        "restart": cmd_restart,
+        "up":      cmd_up,
     }[args.cmd]()
 
 
