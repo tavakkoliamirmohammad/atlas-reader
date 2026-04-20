@@ -232,12 +232,12 @@ class HighlightBody(BaseModel):
     color: str = "yellow"
     page: int | None = None
     note: str | None = None
+    rects: list[dict] | None = None
 
 
 @app.get("/api/highlights/{arxiv_id}")
 async def get_highlights(arxiv_id: str) -> dict:
-    rows = highlights.list_for(arxiv_id)
-    return {"highlights": [_row_to_dict(r) for r in rows]}
+    return {"highlights": highlights.list_for(arxiv_id)}
 
 
 @app.post("/api/highlights/{arxiv_id}")
@@ -253,6 +253,7 @@ async def post_highlight(arxiv_id: str, body: HighlightBody) -> dict:
         color=body.color or "yellow",
         page=body.page,
         note=body.note,
+        rects=body.rects,
     )
     return {"id": new_id}
 
