@@ -169,6 +169,16 @@ export function PdfViewport({
     renderedSetRef.current = new Set();
     renderTasksRef.current.forEach((t) => t.cancel());
     renderTasksRef.current.clear();
+    // Clear canvas + text layer from any wraps that React reuses across the
+    // paper switch (React matches by key=pageNumber, so wraps for pages 1..N
+    // in the old doc become slots for 1..N in the new doc with their old
+    // children still attached). Without this clear, the old paper's rendered
+    // content stays visible and the new renderPage races with itself to
+    // overwrite it — the "click a paper, PDF doesn't update" bug.
+    pageRefs.current.forEach((wrap) => {
+      wrap.querySelector("canvas.pdf-canvas")?.remove();
+      wrap.querySelector(".pdf-text-layer")?.remove();
+    });
     pageRefs.current.clear();
 
     const loadingTask = pdfjsLib.getDocument({ url: fileUrl });
@@ -401,46 +411,16 @@ export function PdfViewport({
     }
   }, [pages, renderPage]);
 
-  useEffect(() => {
-    if (pages.length === 0) return;
-    // Run updateVisibleRange synchronously now AND once more on the next
-    // animation frame. Why both: the synchronous call covers normal mode/
-    // resize updates; the rAF call covers the empty→non-empty paper-switch
-    // transition where ref callbacks for the new page divs haven't all
-    // populated `pageRefs` by the time effects fire (React commit timing
-    // races). Without the rAF retry, renderPage finds `wrap` null and
-    // silently no-ops, leaving canvases blank — the "click a paper and the
-    // PDF doesn't show up" bug. renderPage is idempotent (renderedSet check)
-    // so a double-call is harmless.
-    updateVisibleRange();
-    const retryRaf = window.requestAnimationFrame(() => updateVisibleRange());
-    const node = containerRef.current;
-    if (!node) return;
-    let raf = 0;
-    const onScroll = () => {
-      if (raf) return;
-      raf = window.requestAnimationFrame(() => {
-        raf = 0;
-        updateVisibleRange();
-      });
-    };
-    node.addEventListener("scroll", onScroll, { passive: true });
-    return () => {
-      window.cancelAnimationFrame(retryRaf);
-      node.removeEventListener("scroll", onScroll);
-      if (raf) window.cancelAnimationFrame(raf);
-    };
-  }, [pages, updateVisibleRange]);
-
-  // Invalidate canvases when the container is resized (every page now has a
-  // new scale; old canvases would overlap the new slot at wrong dimensions —
-  // the "PDF badly resized" bug).
+  // Invalidate rendered canvases when the `pages` layout changes to a new
+  // scale (container resized). The existing canvases were drawn at the OLD
+  // scale — the "PDF badly resized" bug. This effect runs BEFORE the
+  // visible-range effect below (declaration order) so by the time
+  // visible-range calls renderPage, the renderedSet has been cleared and
+  // renderPage actually repaints instead of short-circuiting.
   //
-  // Critical: skip the empty→non-empty transition. That fires on initial load
-  // AND on every fileUrl switch — and the visible-range effect just queued
-  // the first renders for the new doc. If we cancel them here the new PDF
-  // never paints (the "click a paper / type a URL and the PDF doesn't update"
-  // bug). Only invalidate when scale actually changed.
+  // Skip the empty→non-empty transition (initial load + every paper switch):
+  // no canvases exist, no invalidation needed, and we don't want to cancel
+  // the first renders either.
   const prevPagesRef = useRef<PageMeta[]>([]);
   useEffect(() => {
     const prev = prevPagesRef.current;
@@ -459,6 +439,36 @@ export function PdfViewport({
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pages]);
+
+  useEffect(() => {
+    if (pages.length === 0) return;
+    updateVisibleRange();
+    const node = containerRef.current;
+    if (!node) return;
+    let raf = 0;
+    const onScroll = () => {
+      if (raf) return;
+      raf = window.requestAnimationFrame(() => {
+        raf = 0;
+        updateVisibleRange();
+      });
+    };
+    node.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      node.removeEventListener("scroll", onScroll);
+      if (raf) window.cancelAnimationFrame(raf);
+    };
+  }, [pages, updateVisibleRange]);
+
+  // Invalidate canvases when the container is resized (every page now has a
+  // new scale; old canvases would overlap the new slot at wrong dimensions —
+  // the "PDF badly resized" bug).
+  //
+  // Critical: skip the empty→non-empty transition. That fires on initial load
+  // AND on every fileUrl switch — and the visible-range effect just queued
+  // the first renders for the new doc. If we cancel them here the new PDF
+  // never paints (the "click a paper / type a URL and the PDF doesn't update"
+  // bug). Only invalidate when scale actually changed.
 
   // Selection wiring (Phase 2). Listen to document selectionchange and decide
   // whether the selection lives inside our viewport. Debounce slightly so we
