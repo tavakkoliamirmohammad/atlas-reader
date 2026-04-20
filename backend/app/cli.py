@@ -49,7 +49,8 @@ def cmd_start() -> int:
         return 0
     log = _log_file().open("ab")
     proc = subprocess.Popen(
-        ["uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", str(PORT)],
+        [sys.executable, "-m", "uvicorn", "app.main:app",
+         "--host", "127.0.0.1", "--port", str(PORT)],
         stdout=log, stderr=log,
         start_new_session=True,
     )
