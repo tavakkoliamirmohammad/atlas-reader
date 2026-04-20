@@ -19,9 +19,10 @@ def _rects_from_json(raw: Any) -> Optional[List[dict]]:
     if raw is None:
         return None
     try:
-        return json.loads(raw)
+        parsed = json.loads(raw)
     except (TypeError, ValueError):
         return None
+    return parsed if isinstance(parsed, list) else None
 
 
 def _row_to_dict(row: sqlite3.Row) -> dict:
