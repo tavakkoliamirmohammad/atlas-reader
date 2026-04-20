@@ -94,3 +94,42 @@ async def test_get_pdf_returns_404_when_paper_missing(atlas_data_dir):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
         r = await c.get("/api/pdf/nope")
     assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_static_index_served_at_root_when_dist_exists(tmp_path, monkeypatch):
+    dist = tmp_path / "dist"
+    dist.mkdir()
+    (dist / "index.html").write_text("<!doctype html><title>Atlas</title>")
+    (dist / "assets").mkdir()
+    (dist / "assets" / "main.js").write_text("console.log('hi')")
+    monkeypatch.setenv("ATLAS_FRONTEND_DIST", str(dist))
+
+    from importlib import reload
+    from app import main as main_mod
+    reload(main_mod)
+
+    async with AsyncClient(transport=ASGITransport(app=main_mod.app), base_url="http://t") as c:
+        r = await c.get("/")
+        assert r.status_code == 200
+        assert "Atlas" in r.text
+
+        r2 = await c.get("/assets/main.js")
+        assert r2.status_code == 200
+        assert "console.log" in r2.text
+
+
+@pytest.mark.asyncio
+async def test_unknown_non_api_path_falls_back_to_index_html(tmp_path, monkeypatch):
+    dist = tmp_path / "dist"
+    dist.mkdir()
+    (dist / "index.html").write_text("<!doctype html><title>Atlas SPA</title>")
+    monkeypatch.setenv("ATLAS_FRONTEND_DIST", str(dist))
+    from importlib import reload
+    from app import main as main_mod
+    reload(main_mod)
+
+    async with AsyncClient(transport=ASGITransport(app=main_mod.app), base_url="http://t") as c:
+        r = await c.get("/reader/2404.12345")
+    assert r.status_code == 200
+    assert "Atlas SPA" in r.text

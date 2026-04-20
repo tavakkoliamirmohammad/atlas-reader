@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import dataclasses
+import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from app import db, digest, health, papers, pdf_cache
 
@@ -61,3 +64,31 @@ async def get_pdf(arxiv_id: str):
         raise HTTPException(status_code=404, detail="paper not found")
     path = await pdf_cache.ensure_cached(arxiv_id)
     return FileResponse(path, media_type="application/pdf", filename=f"{arxiv_id}.pdf")
+
+
+def _frontend_dist() -> Path | None:
+    raw = os.environ.get("ATLAS_FRONTEND_DIST")
+    if raw:
+        p = Path(raw)
+    else:
+        p = Path(__file__).resolve().parents[2] / "frontend" / "dist"
+    return p if p.exists() else None
+
+
+_dist = _frontend_dist()
+if _dist is not None:
+    if (_dist / "assets").exists():
+        app.mount("/assets", StaticFiles(directory=_dist / "assets"), name="assets")
+
+    @app.get("/", include_in_schema=False)
+    async def _index() -> FileResponse:
+        return FileResponse(_dist / "index.html")
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def _spa_fallback(full_path: str) -> FileResponse:
+        if full_path.startswith("api/"):
+            raise HTTPException(status_code=404)
+        candidate = _dist / full_path
+        if candidate.is_file():
+            return FileResponse(candidate)
+        return FileResponse(_dist / "index.html")
