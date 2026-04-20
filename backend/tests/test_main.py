@@ -2,7 +2,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from unittest.mock import AsyncMock, patch
 
-from app import db
+from app import db, papers
 from app.arxiv import Paper
 from app.main import app
 
@@ -53,3 +53,21 @@ async def test_digest_without_build_does_not_call_builder(atlas_data_dir):
             r = await c.get("/api/digest")
     fake_build.assert_not_called()
     assert r.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_get_paper_returns_row_when_found(atlas_data_dir):
+    db.init()
+    papers.upsert([Paper("99", "Hello", "A", "x", "cs.PL", "2026-04-19T08:00:00Z")])
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        r = await c.get("/api/papers/99")
+    assert r.status_code == 200
+    assert r.json()["title"] == "Hello"
+
+
+@pytest.mark.asyncio
+async def test_get_paper_returns_404_when_missing(atlas_data_dir):
+    db.init()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        r = await c.get("/api/papers/missing")
+    assert r.status_code == 404

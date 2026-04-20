@@ -5,7 +5,7 @@ from __future__ import annotations
 import dataclasses
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 
 from app import db, digest, health, papers
 
@@ -42,3 +42,12 @@ async def get_digest(build: bool = False) -> dict:
         await digest.build_today()
     rows = papers.list_recent(days=3)
     return {"count": len(rows), "papers": [_row_to_dict(r) for r in rows]}
+
+
+@app.get("/api/papers/{arxiv_id}")
+async def get_paper(arxiv_id: str) -> dict:
+    """Return a single paper's metadata, 404 if not found."""
+    row = papers.get(arxiv_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="paper not found")
+    return _row_to_dict(row)
