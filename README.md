@@ -46,7 +46,20 @@ Open http://localhost:8765.
 
 Data persists in `./atlas-data/` (mounted into the container at `/data`).
 
-**Caveat — AI features:** Atlas's summarizer and chat use the local `claude -p` CLI + your Claude subscription. The container doesn't have the CLI or your login, so `/api/health` will report `ai: false` and Ask/Summarize will be unavailable. The reader, digest, highlights, and search all work. For AI features, use `atlas up` on the host.
+### Prebuilt image (GHCR)
+
+Every push to `main` publishes a multi-tag image to GitHub Container Registry:
+
+```bash
+docker run --rm -p 8765:8765 -v $(pwd)/atlas-data:/data \
+  ghcr.io/tavakkoliamirmohammad/atlas-reader:latest
+```
+
+Tags available: `latest`, `main`, a short commit SHA (e.g. `sha-75ccae5`), and any semver tag you push (`v0.1.0` → both `v0.1.0` and `0.1.0`).
+
+### Caveat — AI features off in the container
+
+Atlas's summarizer and chat shell out to the local `claude -p` CLI, which reads your personal `~/.claude/` subscription. The published image doesn't have the CLI or your login, so `/api/health` reports `ai: false` and Ask/Summarize are unavailable. The reader, digest, highlights, search, and archive range selector all work inside the container. For AI features, run `atlas up` on the host.
 
 ## CLI
 
