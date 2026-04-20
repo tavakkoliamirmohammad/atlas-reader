@@ -72,8 +72,9 @@ export function ReadingProgressRail({ progress, onJumpToPage }: Props) {
           }}
         />
 
-        {/* Section markers */}
-        {!isStatic &&
+        {/* Section markers — hidden per user preference; the filled-bar
+            progress is enough. Keep the code so we can re-enable later. */}
+        {false && !isStatic &&
           total > 1 &&
           sections.map((m, i) => {
             const denom = total - 1;
