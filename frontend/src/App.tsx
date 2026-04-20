@@ -9,6 +9,7 @@ import { IndexRoute } from "./routes/IndexRoute";
 import { ReaderRoute } from "./routes/ReaderRoute";
 import { useUiStore } from "./stores/ui-store";
 import { applyPalette, getPaletteById } from "./lib/theme";
+import { useGlobalShortcuts } from "./lib/keyboard";
 
 export default function App() {
   const leftCollapsed = useUiStore((s) => s.leftCollapsed);
@@ -19,6 +20,8 @@ export default function App() {
     const p = getPaletteById(paletteId);
     if (p) applyPalette(p);
   }, [paletteId]);
+
+  useGlobalShortcuts();
 
   const leftW = leftCollapsed ? "0px" : "270px";
   const rightW = rightCollapsed ? "0px" : "320px";
