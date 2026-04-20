@@ -62,7 +62,7 @@ def _row_to_dict(row) -> dict:
 async def get_digest(build: bool = False) -> dict:
     if build:
         await digest.build_today()
-    rows = papers.list_recent(days=3)
+    rows = papers.list_recent(days=7)
     return {"count": len(rows), "papers": [_row_to_dict(r) for r in rows]}
 
 

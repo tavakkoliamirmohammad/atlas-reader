@@ -75,7 +75,7 @@ async def build_today() -> list[sqlite3.Row]:
             except Exception as exc:
                 import logging
                 logging.getLogger(__name__).warning("ranker failed: %s", exc)
-        rows = papers.list_recent(days=3)
+        rows = papers.list_recent(days=7)
         _finish_build(status="done", paper_count=len(seen))
         return rows
     except Exception as e:
