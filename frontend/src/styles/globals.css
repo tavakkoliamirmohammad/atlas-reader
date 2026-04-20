@@ -18,7 +18,7 @@
   --right-w: 320px;
 }
 
-html, body, #root { height: 100%; }
+html, body, #root { height: 100%; overflow: hidden; }
 body { background: #08080d; color: #e5e7ef; font-family: Inter, system-ui, sans-serif; }
 
 .aurora-bg {
@@ -39,6 +39,7 @@ body { background: #08080d; color: #e5e7ef; font-family: Inter, system-ui, sans-
 }
 
 .stage-shell {
-  position: relative; min-height: 100vh; overflow: hidden;
+  position: relative; height: 100vh; overflow: hidden;
   background: #08080d;
+  display: flex; flex-direction: column;
 }

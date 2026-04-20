@@ -14,7 +14,7 @@ import webbrowser
 from pathlib import Path
 from typing import Optional, Sequence
 
-from app import db
+from app import db, launchd
 
 
 PORT = 8765
@@ -160,20 +160,33 @@ def cmd_up() -> int:
     return 0
 
 
+def cmd_install_launchd() -> int:
+    print(launchd.install())
+    return 0
+
+
+def cmd_uninstall_launchd() -> int:
+    print(launchd.uninstall())
+    return 0
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(prog="atlas")
     sub = parser.add_subparsers(dest="cmd", required=True)
-    for name in ("start", "stop", "status", "logs", "open", "restart", "up"):
+    for name in ("start", "stop", "status", "logs", "open", "restart", "up",
+                 "install-launchd", "uninstall-launchd"):
         sub.add_parser(name)
     args = parser.parse_args(argv)
     return {
-        "start":   cmd_start,
-        "stop":    cmd_stop,
-        "status":  cmd_status,
-        "logs":    cmd_logs,
-        "open":    cmd_open,
-        "restart": cmd_restart,
-        "up":      cmd_up,
+        "start":             cmd_start,
+        "stop":              cmd_stop,
+        "status":            cmd_status,
+        "logs":              cmd_logs,
+        "open":              cmd_open,
+        "restart":           cmd_restart,
+        "up":                cmd_up,
+        "install-launchd":   cmd_install_launchd,
+        "uninstall-launchd": cmd_uninstall_launchd,
     }[args.cmd]()
 
 

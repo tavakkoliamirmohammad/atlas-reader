@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useMatch } from "react-router-dom";
 import {
   type ChatMessage,
   fetchConversations,
@@ -10,7 +10,10 @@ import { StreamingMessage } from "./StreamingMessage";
 import { QuickActionChips } from "./QuickActionChips";
 
 export function ChatPanel() {
-  const { arxivId } = useParams<{ arxivId: string }>();
+  // useMatch climbs the URL directly, so this works even though ChatPanel
+  // lives outside the <Routes> block (where useParams would return empty).
+  const match = useMatch("/reader/:arxivId");
+  const arxivId = match?.params.arxivId;
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [streaming, setStreaming] = useState(false);
   const [draft, setDraft] = useState("");
