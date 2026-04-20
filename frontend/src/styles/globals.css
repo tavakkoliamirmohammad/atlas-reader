@@ -20,3 +20,25 @@
 
 html, body, #root { height: 100%; }
 body { background: #08080d; color: #e5e7ef; font-family: Inter, system-ui, sans-serif; }
+
+.aurora-bg {
+  position: absolute; inset: -40%; pointer-events: none; opacity: 0.35;
+  background:
+    radial-gradient(60% 50% at 18% 20%, var(--ac1) 0%, transparent 60%),
+    radial-gradient(50% 40% at 85% 12%, var(--ac2) 0%, transparent 65%),
+    radial-gradient(45% 50% at 80% 80%, var(--ac1) 0%, transparent 70%);
+  filter: blur(70px);
+  animation: drift 20s ease-in-out infinite alternate;
+  transition: background .35s ease;
+}
+
+.glass-panel {
+  background: rgba(18, 18, 28, 0.55);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+.stage-shell {
+  position: relative; min-height: 100vh; overflow: hidden;
+  background: #08080d;
+}
