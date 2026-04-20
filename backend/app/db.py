@@ -43,6 +43,13 @@ CREATE TABLE IF NOT EXISTS prefs (
     value  TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS events (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts          TEXT NOT NULL,
+    event       TEXT NOT NULL,
+    arxiv_id    TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_events_ts ON events(ts);
 CREATE INDEX IF NOT EXISTS idx_papers_published ON papers(published);
 CREATE INDEX IF NOT EXISTS idx_conv_arxiv      ON conversations(arxiv_id);
 """
