@@ -35,3 +35,15 @@ def test_stop_removes_pid_file(atlas_data_dir):
         cli.main(["stop"])
     assert not pid_file.exists()
     MockKill.assert_called_once()
+
+
+def test_install_launchd_calls_launchd_install(capsys, atlas_data_dir):
+    with patch("app.cli.launchd.install", return_value="installed: /tmp/foo.plist"):
+        cli.main(["install-launchd"])
+    assert "installed" in capsys.readouterr().out
+
+
+def test_uninstall_launchd_calls_launchd_uninstall(capsys, atlas_data_dir):
+    with patch("app.cli.launchd.uninstall", return_value="removed: /tmp/foo.plist"):
+        cli.main(["uninstall-launchd"])
+    assert "removed" in capsys.readouterr().out
