@@ -1,50 +1,54 @@
 import { useEffect, useState } from "react";
-import { api } from "@/lib/api";
-import { useUiStore } from "@/stores/ui-store";
+import { Sun, Book, Moon } from "lucide-react";
+import { api, type Paper } from "@/lib/api";
+import { useUiStore, type ReadingMode } from "@/stores/ui-store";
 import { PdfPage } from "./PdfPage";
-import { PdfToolbar } from "./PdfToolbar";
-import { PdfThumbsRail } from "./PdfThumbsRail";
 
 type Props = { arxivId: string };
 
+const MODES: { id: ReadingMode; label: string; Icon: typeof Sun }[] = [
+  { id: "light", label: "Light", Icon: Sun },
+  { id: "sepia", label: "Sepia", Icon: Book },
+  { id: "dark",  label: "Dark",  Icon: Moon },
+];
+
 export function PaperReader({ arxivId }: Props) {
-  const [pageCount, setPageCount] = useState(0);
-  const [page, setPage] = useState(1);
-  const [scale, setScale] = useState(1);
+  const [, setPaper] = useState<Paper | null>(null);
   const mode = useUiStore((s) => s.readingMode);
   const setMode = useUiStore((s) => s.setReadingMode);
 
   useEffect(() => {
-    setPage(1);
-    setPageCount(0);
-    api.paper(arxivId).catch(() => {});
+    api.paper(arxivId).then(setPaper).catch(() => setPaper(null));
   }, [arxivId]);
 
   return (
-    <div className="grid h-full" style={{ gridTemplateColumns: "58px 1fr" }}>
-      <PdfThumbsRail pageCount={pageCount} current={page} onJump={setPage} />
-      <div className="relative flex justify-center items-start p-6 overflow-y-auto">
-        <PdfToolbar
-          arxivId={arxivId}
-          page={page}
-          pageCount={pageCount}
-          scale={scale}
-          mode={mode}
-          onPrev={() => setPage((p) => Math.max(1, p - 1))}
-          onNext={() => setPage((p) => Math.min(pageCount || p, p + 1))}
-          onZoomIn={() => setScale((s) => Math.min(2, s + 0.1))}
-          onZoomOut={() => setScale((s) => Math.max(0.5, s - 0.1))}
-          onModeChange={setMode}
-        />
-        <div className="pt-14 max-w-[720px] w-full">
-          <PdfPage
-            fileUrl={api.pdfUrl(arxivId)}
-            page={page}
-            scale={scale}
-            mode={mode}
-            onLoadSuccess={setPageCount}
-          />
-        </div>
+    <div className="flex flex-col h-full">
+      <div className="flex items-center gap-2 px-4 py-2 border-b border-white/5 bg-[rgba(8,8,13,0.5)] backdrop-blur-sm">
+        <span className="font-mono text-[11px] text-[color:var(--ac1)]">arXiv:{arxivId}</span>
+        <span className="ml-auto inline-flex items-center gap-1 rounded-full border border-white/5 bg-white/[0.03] p-1">
+          {MODES.map(({ id, label, Icon }) => {
+            const active = mode === id;
+            return (
+              <button
+                key={id}
+                onClick={() => setMode(id)}
+                aria-pressed={active}
+                aria-label={`${label} reading mode`}
+                className={[
+                  "px-2 py-0.5 rounded-full text-[11px] flex items-center gap-1 transition-colors",
+                  active
+                    ? "text-[color:var(--ac1)] bg-[color:var(--ac1-soft)] border border-[color:var(--ac1-mid)]"
+                    : "text-slate-400 border border-transparent hover:text-white",
+                ].join(" ")}
+              >
+                <Icon size={12} /> {label}
+              </button>
+            );
+          })}
+        </span>
+      </div>
+      <div className="flex-1 overflow-hidden p-4">
+        <PdfPage fileUrl={api.pdfUrl(arxivId)} mode={mode} />
       </div>
     </div>
   );
