@@ -37,6 +37,30 @@ async def test_build_today_writes_build_status_row(atlas_data_dir):
         await digest.build_today()
 
     with db.connect() as conn:
-        rows = list(conn.execute("SELECT date, status FROM builds"))
+        rows = list(conn.execute(
+            "SELECT date, status, started_at, finished_at, paper_count FROM builds"
+        ))
     assert len(rows) == 1
     assert rows[0]["status"] == "done"
+    assert rows[0]["paper_count"] == 0
+    assert rows[0]["started_at"] is not None
+    assert rows[0]["finished_at"] is not None
+    assert rows[0]["started_at"] <= rows[0]["finished_at"]
+
+
+@pytest.mark.asyncio
+async def test_build_today_records_failure_when_fetch_raises(atlas_data_dir):
+    db.init()
+    with patch(
+        "app.digest.arxiv.fetch_recent",
+        new=AsyncMock(side_effect=RuntimeError("arxiv down")),
+    ):
+        with pytest.raises(RuntimeError, match="arxiv down"):
+            await digest.build_today()
+
+    with db.connect() as conn:
+        rows = list(conn.execute("SELECT status, log FROM builds"))
+    assert len(rows) == 1
+    assert rows[0]["status"] == "failed"
+    assert "RuntimeError" in rows[0]["log"]
+    assert "arxiv down" in rows[0]["log"]

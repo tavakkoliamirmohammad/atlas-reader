@@ -30,30 +30,48 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
-def _record_build(status: str, paper_count: int = 0, log: str = "") -> None:
+def _start_build() -> None:
+    """Insert a 'building' row at start time, or reset finish/log on retry."""
     with db.connect() as conn:
         conn.execute(
             """INSERT INTO builds (date, status, started_at, finished_at, paper_count, log)
-               VALUES (?, ?, ?, ?, ?, ?)
+               VALUES (?, 'building', ?, NULL, 0, '')
                ON CONFLICT(date) DO UPDATE SET
-                 status=excluded.status,
-                 finished_at=excluded.finished_at,
-                 paper_count=excluded.paper_count,
-                 log=excluded.log""",
-            (_today_iso(), status, _now_iso(), _now_iso(), paper_count, log),
+                 status='building',
+                 started_at=excluded.started_at,
+                 finished_at=NULL,
+                 paper_count=0,
+                 log=''""",
+            (_today_iso(), _now_iso()),
+        )
+
+
+def _finish_build(status: str, paper_count: int = 0, log: str = "") -> None:
+    """Update today's build row with the terminal status."""
+    with db.connect() as conn:
+        conn.execute(
+            """UPDATE builds
+                 SET status = ?, finished_at = ?, paper_count = ?, log = ?
+               WHERE date = ?""",
+            (status, _now_iso(), paper_count, log, _today_iso()),
         )
 
 
 async def build_today() -> list[sqlite3.Row]:
     """Fetch both arXiv queries, dedupe, persist, and return the row set."""
-    pl = await arxiv.fetch_recent(PL_QUERY, max_results=100)
-    other = await arxiv.fetch_recent(KEYWORD_QUERY, max_results=30)
+    _start_build()
+    try:
+        pl = await arxiv.fetch_recent(PL_QUERY, max_results=100)
+        other = await arxiv.fetch_recent(KEYWORD_QUERY, max_results=30)
 
-    seen: dict[str, arxiv.Paper] = {}
-    for p in (*pl, *other):
-        seen.setdefault(p.arxiv_id, p)
+        seen: dict[str, arxiv.Paper] = {}
+        for p in (*pl, *other):
+            seen.setdefault(p.arxiv_id, p)
 
-    papers.upsert(list(seen.values()))
-    rows = papers.list_recent(days=3)
-    _record_build(status="done", paper_count=len(seen))
-    return rows
+        papers.upsert(list(seen.values()))
+        rows = papers.list_recent(days=3)
+        _finish_build(status="done", paper_count=len(seen))
+        return rows
+    except Exception as e:
+        _finish_build(status="failed", log=f"{type(e).__name__}: {e}")
+        raise
