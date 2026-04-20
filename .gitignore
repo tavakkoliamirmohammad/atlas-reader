@@ -12,3 +12,6 @@ data/
 dist/
 build/
 *.egg-info/
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
