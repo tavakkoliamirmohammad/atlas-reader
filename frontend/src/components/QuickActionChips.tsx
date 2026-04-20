@@ -18,7 +18,7 @@ export function QuickActionChips({ onSummarize, onQuickAsk, disabled }: Props) {
         onClick={onSummarize}
         disabled={disabled}
         aria-label="Generate deep summary"
-        className="px-3 py-1.5 rounded-full text-[11px] font-semibold cursor-pointer disabled:opacity-50 transition-all hover:translate-y-[-1px]"
+        className="px-3 py-1.5 rounded-full text-[11px] font-semibold cursor-pointer disabled:opacity-50 transition-all hover:translate-y-[-1px] shimmer"
         style={{
           background: "var(--user-grad)",
           color: "var(--user-ink)",

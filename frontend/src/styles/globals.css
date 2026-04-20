@@ -43,3 +43,42 @@ body { background: #08080d; color: #e5e7ef; font-family: Inter, system-ui, sans-
   background: #08080d;
   display: flex; flex-direction: column;
 }
+
+@keyframes atlas-fade-up {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes atlas-shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position:  200% 0; }
+}
+
+@keyframes atlas-pulse-dot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: 0.6; transform: scale(1.4); }
+}
+
+html[data-motion="on"] .fade-up   { animation: atlas-fade-up 240ms ease-out both; }
+html[data-motion="on"] .pulse-dot { animation: atlas-pulse-dot 1.6s ease-in-out infinite; }
+
+html[data-motion="on"] .hover-lift {
+  transition: transform 180ms ease-out, box-shadow 180ms ease-out;
+}
+html[data-motion="on"] .hover-lift:hover {
+  transform: translateY(-1px);
+}
+
+html[data-motion="on"] .shimmer {
+  background-image: linear-gradient(100deg, transparent 20%, rgba(255,255,255,0.18) 50%, transparent 80%);
+  background-size: 200% 100%;
+  animation: atlas-shimmer 2.4s linear infinite;
+}
+
+html[data-motion="off"] .fade-up,
+html[data-motion="off"] .pulse-dot,
+html[data-motion="off"] .hover-lift,
+html[data-motion="off"] .shimmer {
+  animation: none !important;
+  transition: none !important;
+}

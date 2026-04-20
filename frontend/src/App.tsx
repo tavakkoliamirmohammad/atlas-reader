@@ -13,6 +13,8 @@ import { installKeyboard, useShortcut } from "./lib/keyboard";
 import { installMotionAttribute } from "./lib/motion";
 import { ShortcutsOverlay } from "./components/ShortcutsOverlay";
 import { CommandPalette } from "./components/CommandPalette";
+import { Footer } from "./components/Footer";
+import { BuildProgressOverlay } from "./components/BuildProgressOverlay";
 
 export default function App() {
   const leftCollapsed = useUiStore((s) => s.leftCollapsed);
@@ -31,6 +33,18 @@ export default function App() {
 
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [buildOpen, setBuildOpen] = useState(false);
+  const todayISO = new Date().toISOString().slice(0, 10);
+
+  // On first load, if /api/digest is empty, kick off a build with progress overlay
+  useEffect(() => {
+    fetch("/api/digest").then((r) => r.json()).then((b) => {
+      if ((b?.count ?? 0) === 0) {
+        setBuildOpen(true);
+        fetch("/api/digest?build=true").catch(() => {});
+      }
+    }).catch(() => {});
+  }, []);
 
   useShortcut("[", () => useUiStore.getState().toggleLeft());
   useShortcut("]", () => useUiStore.getState().toggleRight());
@@ -73,7 +87,9 @@ export default function App() {
 
         <ShortcutsOverlay open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
         <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
+        <BuildProgressOverlay open={buildOpen} date={todayISO} onDone={() => setBuildOpen(false)} />
       </div>
+      <Footer />
     </div>
   );
 }

@@ -14,7 +14,7 @@ export function StreamingMessage({ role, content, isStreaming }: Props) {
 
   const isUser = role === "user";
   return (
-    <div ref={ref} className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
+    <div ref={ref} className={`flex fade-up ${isUser ? "justify-end" : "justify-start"}`}>
       <div
         className={[
           "max-w-[90%] rounded-xl px-3 py-2 text-[13px] leading-relaxed whitespace-pre-wrap",

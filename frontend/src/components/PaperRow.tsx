@@ -10,7 +10,7 @@ export function PaperRow({ paper }: Props) {
     <Link
       to={`/reader/${paper.arxiv_id}`}
       className={[
-        "block px-3.5 py-2 border-t border-white/5 transition-all duration-200",
+        "block px-3.5 py-2 border-t border-white/5 transition-all duration-200 hover-lift",
         "hover:bg-white/[0.03] hover:translate-x-[2px]",
         active ? "border-l-2 border-l-[color:var(--ac1)] bg-gradient-to-r from-[color:var(--ac1-soft)] to-transparent" : "",
       ].join(" ")}
