@@ -71,3 +71,26 @@ async def test_get_paper_returns_404_when_missing(atlas_data_dir):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
         r = await c.get("/api/papers/missing")
     assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_get_pdf_returns_cached_bytes(atlas_data_dir, fixtures_dir):
+    db.init()
+    papers.upsert([Paper("44", "T", "A", "x", "cs.PL", "2026-04-19T08:00:00Z")])
+    pdf_bytes = (fixtures_dir / "tiny.pdf").read_bytes()
+    target = atlas_data_dir / "pdfs" / "44.pdf"
+    target.write_bytes(pdf_bytes)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        r = await c.get("/api/pdf/44")
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "application/pdf"
+    assert r.content == pdf_bytes
+
+
+@pytest.mark.asyncio
+async def test_get_pdf_returns_404_when_paper_missing(atlas_data_dir):
+    db.init()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        r = await c.get("/api/pdf/nope")
+    assert r.status_code == 404

@@ -6,8 +6,9 @@ import dataclasses
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse
 
-from app import db, digest, health, papers
+from app import db, digest, health, papers, pdf_cache
 
 
 @asynccontextmanager
@@ -51,3 +52,12 @@ async def get_paper(arxiv_id: str) -> dict:
     if row is None:
         raise HTTPException(status_code=404, detail="paper not found")
     return _row_to_dict(row)
+
+
+@app.get("/api/pdf/{arxiv_id}")
+async def get_pdf(arxiv_id: str):
+    """Serve the cached PDF for a paper, downloading from arXiv on first request."""
+    if papers.get(arxiv_id) is None:
+        raise HTTPException(status_code=404, detail="paper not found")
+    path = await pdf_cache.ensure_cached(arxiv_id)
+    return FileResponse(path, media_type="application/pdf", filename=f"{arxiv_id}.pdf")
