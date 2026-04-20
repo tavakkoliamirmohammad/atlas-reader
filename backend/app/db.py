@@ -57,6 +57,7 @@ CREATE TABLE IF NOT EXISTS highlights (
     color       TEXT NOT NULL DEFAULT 'yellow',
     page        INTEGER,
     note        TEXT,
+    rects       TEXT,
     created_at  TEXT DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_highlights_arxiv ON highlights(arxiv_id);
@@ -120,6 +121,13 @@ def init() -> None:
     """
     with sqlite3.connect(db_path()) as conn:
         conn.executescript(SCHEMA)
+
+        # Migration: add `rects TEXT` to highlights if it's missing (DBs
+        # created before 2026-04-20).
+        cur = conn.execute("PRAGMA table_info(highlights)")
+        cols = {row[1] for row in cur.fetchall()}
+        if "rects" not in cols:
+            conn.execute("ALTER TABLE highlights ADD COLUMN rects TEXT")
 
         # Backfill papers_fts from existing rows when the FTS index is empty
         # but the papers table has data (older DBs created before FTS5 existed).
