@@ -102,6 +102,8 @@ export function ChatPanel() {
   const setModel = useUiStore((s) => s.setModel);
   const summarizeRequestId = useUiStore((s) => s.summarizeRequestId);
   const askRequest = useUiStore((s) => s.askRequest);
+  const pinnedQuote = useUiStore((s) => s.pinnedQuote);
+  const clearPinnedQuote = useUiStore((s) => s.clearPinnedQuote);
 
   // Wipe ephemeral messages on paper switch.
   useEffect(() => {
@@ -164,10 +166,16 @@ export function ChatPanel() {
   }
 
   async function send(overridePrompt?: string) {
-    const question = (overridePrompt ?? draft).trim();
-    if (!arxivId || !question || streaming) return;
+    const typed = (overridePrompt ?? draft).trim();
+    if (!arxivId || streaming) return;
+    if (!typed && !pinnedQuote) return;
+    const question = pinnedQuote
+      ? `> ${pinnedQuote.text.replace(/\n/g, "\n> ")}\n\n${typed}`.trim()
+      : typed;
+    if (!question) return;
     const historyForBackend = messages;
     setDraft("");
+    clearPinnedQuote();
     setMessages((m) => [
       ...m,
       { role: "user", content: question },
@@ -181,7 +189,7 @@ export function ChatPanel() {
         onDone: () => setStreaming(false),
         onError: (e) => { appendChunk(`\n\n[error: ${e}]`); setStreaming(false); },
       }, abortRef.current.signal, model);
-    } catch (e) {
+    } catch {
       setStreaming(false);
     }
   }
@@ -252,6 +260,43 @@ export function ChatPanel() {
             "focus-within:shadow-[0_0_24px_-8px_var(--ac1-mid)]",
           ].join(" ")}
         >
+          {pinnedQuote && (
+            <div
+              className="rounded-lg bg-white/[0.04] border border-[color:var(--ac1-mid)] px-3 py-2 flex items-start gap-2"
+              role="note"
+              aria-label="Quote pinned for next question"
+            >
+              <span
+                className="mt-0.5 w-1 self-stretch rounded-full"
+                style={{ background: "var(--ac1)" }}
+                aria-hidden
+              />
+              <div className="flex-1 min-w-0">
+                <div className="text-[10px] uppercase tracking-wider text-slate-400 mb-0.5">
+                  Asking about · p.{pinnedQuote.page}
+                </div>
+                <div
+                  className="text-[12px] text-slate-200 leading-snug overflow-hidden"
+                  style={{
+                    display: "-webkit-box",
+                    WebkitLineClamp: 3,
+                    WebkitBoxOrient: "vertical",
+                  }}
+                  title={pinnedQuote.text}
+                >
+                  {pinnedQuote.text}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={clearPinnedQuote}
+                aria-label="Remove pinned quote"
+                className="text-slate-500 hover:text-slate-200 cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+          )}
           <textarea
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
@@ -272,7 +317,7 @@ export function ChatPanel() {
               </span>
               <button
                 onClick={streaming ? () => abortRef.current?.abort() : () => send()}
-                disabled={!streaming && !draft.trim()}
+                disabled={!streaming && !draft.trim() && !pinnedQuote}
                 aria-label={streaming ? "Stop" : "Send"}
                 title={streaming ? "Stop generating" : "Send"}
                 className={[
@@ -281,19 +326,19 @@ export function ChatPanel() {
                   "cursor-pointer transition-all duration-200",
                   streaming
                     ? "hover:scale-110 shadow-[0_0_16px_rgba(244,63,94,0.45)]"
-                    : draft.trim()
+                    : (draft.trim() || pinnedQuote)
                     ? "hover:scale-110 shadow-[0_0_16px_var(--ac1-mid)]"
                     : "",
                 ].join(" ")}
                 style={{
                   background: streaming
                     ? "rgba(244,63,94,0.18)"
-                    : draft.trim()
+                    : (draft.trim() || pinnedQuote)
                     ? "var(--user-grad)"
                     : "rgba(255,255,255,0.06)",
                   color: streaming
                     ? "rgb(251 113 133)"
-                    : draft.trim()
+                    : (draft.trim() || pinnedQuote)
                     ? "var(--user-ink)"
                     : "rgb(148 163 184)",
                   border: streaming ? "1px solid rgba(244,63,94,0.35)" : undefined,

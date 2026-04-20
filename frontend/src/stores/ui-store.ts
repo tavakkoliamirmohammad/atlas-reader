@@ -22,6 +22,9 @@ type UiState = {
   // subscribers fire on each increment via a `useEffect(..., [id])`.
   summarizeRequestId: number;
   askRequest: AskRequest | null;
+  pinnedQuote: { text: string; page: number } | null;
+  setPinnedQuote: (q: { text: string; page: number }) => void;
+  clearPinnedQuote: () => void;
   setPalette: (id: string) => void;
   setCustomPalette: (p: CustomPalette | null) => void;
   toggleLeft: () => void;
@@ -48,6 +51,9 @@ export const useUiStore = create<UiState>()(
       lastHighlightColor: "yellow",
       summarizeRequestId: 0,
       askRequest: null,
+      pinnedQuote: null,
+      setPinnedQuote: (q) => set({ pinnedQuote: q }),
+      clearPinnedQuote: () => set({ pinnedQuote: null }),
       setPalette: (id) => set({ paletteId: id }),
       setCustomPalette: (p) => set({ customPalette: p }),
       toggleLeft: () => set((s) => ({ leftCollapsed: !s.leftCollapsed })),

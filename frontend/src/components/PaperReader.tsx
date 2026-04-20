@@ -68,6 +68,7 @@ export function PaperReader({ arxivId }: Props) {
   const mode = useUiStore((s) => s.readingMode);
   const defaultHighlightColor = useUiStore((s) => s.lastHighlightColor);
   const setLastHighlightColor = useUiStore((s) => s.setLastHighlightColor);
+  const setPinnedQuote = useUiStore((s) => s.setPinnedQuote);
   const [items, setItems] = useState<Highlight[]>([]);
   const [selection, setSelection] = useState<SelectionPayload | null>(null);
   const jumpRef = useRef<((pageNumber: number) => void) | null>(null);
@@ -169,14 +170,10 @@ export function PaperReader({ arxivId }: Props) {
 
   const askFromSelection = useCallback(() => {
     if (!selection) return;
-    // Task 6 will wire this to the pinned-quote store. For now: stub.
-    console.info("[Atlas TODO(task-6)] Ask-about-this: quote pending pin", {
-      page: selection.page,
-      text: selection.text.slice(0, 80),
-    });
+    setPinnedQuote({ text: selection.text, page: selection.page });
     setSelection(null);
     window.getSelection()?.removeAllRanges();
-  }, [selection]);
+  }, [selection, setPinnedQuote]);
 
   return (
     <HighlightsProvider value={contextValue}>
