@@ -1,3 +1,6 @@
+import pytest
+from unittest.mock import AsyncMock, patch
+
 from app import arxiv
 
 
@@ -30,3 +33,25 @@ def test_parse_collapses_whitespace_in_title_and_abstract(fixtures_dir):
 def test_parse_empty_feed_returns_empty_list():
     xml_text = '<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom"/>'
     assert arxiv.parse_feed(xml_text) == []
+
+
+@pytest.mark.asyncio
+async def test_fetch_recent_calls_arxiv_api(fixtures_dir):
+    xml_text = (fixtures_dir / "arxiv_sample.xml").read_text()
+    fake_response = AsyncMock()
+    fake_response.text = xml_text
+    fake_response.raise_for_status = lambda: None
+
+    with patch("app.arxiv.httpx.AsyncClient") as MockClient:
+        instance = MockClient.return_value.__aenter__.return_value
+        instance.get = AsyncMock(return_value=fake_response)
+
+        papers = await arxiv.fetch_recent(query="cat:cs.PL", max_results=10)
+
+    assert len(papers) == 2
+    args, kwargs = instance.get.call_args
+    assert args[0] == "https://export.arxiv.org/api/query"
+    assert kwargs["params"]["search_query"] == "cat:cs.PL"
+    assert kwargs["params"]["max_results"] == "10"
+    assert kwargs["params"]["sortBy"] == "submittedDate"
+    assert kwargs["params"]["sortOrder"] == "descending"

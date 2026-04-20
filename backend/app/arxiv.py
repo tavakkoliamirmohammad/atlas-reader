@@ -6,6 +6,8 @@ import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 
+import httpx
+
 
 _NS = {"atom": "http://www.w3.org/2005/Atom"}
 _WS = re.compile(r"\s+")
@@ -60,3 +62,20 @@ def parse_feed(xml_text: str) -> list[Paper]:
             )
         )
     return out
+
+
+ARXIV_ENDPOINT = "https://export.arxiv.org/api/query"
+
+
+async def fetch_recent(query: str, max_results: int = 100, timeout: float = 30.0) -> list[Paper]:
+    """Hit the arXiv API and parse the response. `query` is an arXiv search_query string."""
+    params = {
+        "search_query": query,
+        "sortBy": "submittedDate",
+        "sortOrder": "descending",
+        "max_results": str(max_results),
+    }
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        resp = await client.get(ARXIV_ENDPOINT, params=params)
+        resp.raise_for_status()
+        return parse_feed(resp.text)
