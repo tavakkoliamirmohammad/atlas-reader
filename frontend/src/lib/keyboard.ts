@@ -77,7 +77,7 @@ export const SHORTCUTS: Array<{ combo: string; label: string }> = [
   { combo: "[",      label: "Toggle left panel" },
   { combo: "]",      label: "Toggle right panel" },
   { combo: "s",      label: "Summarize current paper" },
-  { combo: "/",      label: "Focus URL bar" },
+  { combo: "/",      label: "Search papers" },
   { combo: "?",      label: "Show shortcuts overlay" },
   { combo: "mod+k",  label: "Open command palette" },
   { combo: "escape", label: "Close overlay" },

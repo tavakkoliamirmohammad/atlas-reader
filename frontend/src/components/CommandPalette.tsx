@@ -6,9 +6,9 @@ import { PALETTES } from "@/lib/theme";
 
 type Paper = { arxiv_id: string; title: string };
 
-type Props = { open: boolean; onClose: () => void };
+type Props = { open: boolean; onClose: () => void; onSearch?: () => void };
 
-export function CommandPalette({ open, onClose }: Props) {
+export function CommandPalette({ open, onClose, onSearch }: Props) {
   const [papers, setPapers] = useState<Paper[]>([]);
   const navigate = useNavigate();
   const setPalette = useUiStore((s) => s.setPalette);
@@ -40,6 +40,20 @@ export function CommandPalette({ open, onClose }: Props) {
           />
           <Command.List className="max-h-[400px] overflow-y-auto p-2">
             <Command.Empty className="p-4 text-sm text-zinc-500">No results.</Command.Empty>
+
+            <Command.Group heading="Actions">
+              <Command.Item
+                value="search papers full text"
+                onSelect={() => {
+                  if (onSearch) onSearch();
+                  else onClose();
+                }}
+                className="cursor-pointer rounded px-2 py-2 text-sm text-zinc-200 aria-selected:bg-white/10"
+              >
+                Search papers (full text)
+                <span className="ml-2 font-mono text-xs text-zinc-500">/</span>
+              </Command.Item>
+            </Command.Group>
 
             <Command.Group heading="Papers">
               {papers.slice(0, 30).map((p) => (

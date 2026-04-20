@@ -196,3 +196,27 @@ export async function fetchGlossaryDefinition(
   const body = await r.json();
   return body.definition as string;
 }
+
+export type SearchResult = {
+  arxiv_id: string;
+  title: string;
+  authors: string;
+  snippet: string;
+  rank: number;
+};
+
+export type SearchResponse = { count: number; results: SearchResult[] };
+
+export async function searchPapers(
+  query: string,
+  limit = 20,
+  signal?: AbortSignal,
+): Promise<SearchResult[]> {
+  const q = query.trim();
+  if (!q) return [];
+  const url = `/api/search?q=${encodeURIComponent(q)}&limit=${limit}`;
+  const r = await fetch(url, { signal });
+  if (!r.ok) throw new Error(`/api/search -> ${r.status}`);
+  const body: SearchResponse = await r.json();
+  return body.results;
+}

@@ -13,6 +13,7 @@ import { installKeyboard, useShortcut } from "./lib/keyboard";
 import { installMotionAttribute } from "./lib/motion";
 import { ShortcutsOverlay } from "./components/ShortcutsOverlay";
 import { CommandPalette } from "./components/CommandPalette";
+import { SearchPalette } from "./components/SearchPalette";
 import { Footer } from "./components/Footer";
 import { BuildProgressOverlay } from "./components/BuildProgressOverlay";
 
@@ -33,6 +34,7 @@ export default function App() {
 
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
   const [buildOpen, setBuildOpen] = useState(false);
   const todayISO = new Date().toISOString().slice(0, 10);
 
@@ -50,7 +52,12 @@ export default function App() {
   useShortcut("]", () => useUiStore.getState().toggleRight());
   useShortcut("?", () => setShortcutsOpen((v) => !v));
   useShortcut("mod+k", () => setPaletteOpen((v) => !v));
-  useShortcut("escape", () => { setShortcutsOpen(false); setPaletteOpen(false); });
+  useShortcut("/", () => setSearchOpen((v) => !v));
+  useShortcut("escape", () => {
+    setShortcutsOpen(false);
+    setPaletteOpen(false);
+    setSearchOpen(false);
+  });
 
   const leftW = leftCollapsed ? "0px" : "270px";
   const rightW = rightCollapsed ? "0px" : "320px";
@@ -86,7 +93,15 @@ export default function App() {
         </aside>
 
         <ShortcutsOverlay open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
-        <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
+        <CommandPalette
+          open={paletteOpen}
+          onClose={() => setPaletteOpen(false)}
+          onSearch={() => {
+            setPaletteOpen(false);
+            setSearchOpen(true);
+          }}
+        />
+        <SearchPalette open={searchOpen} onClose={() => setSearchOpen(false)} />
         <BuildProgressOverlay open={buildOpen} date={todayISO} onDone={() => setBuildOpen(false)} />
       </div>
       <Footer />
