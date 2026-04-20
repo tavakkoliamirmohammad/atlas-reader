@@ -11,7 +11,7 @@ from app import claude_subprocess, papers, pdf_cache
 TEMPLATE_PATH = Path(__file__).parent / "prompts" / "summary_template.txt"
 
 
-async def summarize(arxiv_id: str) -> AsyncIterator[str]:
+async def summarize(arxiv_id: str, model: str = "opus") -> AsyncIterator[str]:
     """Yield chunks of a deep summary for the paper. Raises KeyError if missing."""
     if papers.get(arxiv_id) is None:
         raise KeyError(arxiv_id)
@@ -24,10 +24,13 @@ async def summarize(arxiv_id: str) -> AsyncIterator[str]:
         f"per the template below.\n\n{template}"
     )
 
+    args = ["--model", model]
+    if model == "opus":
+        args += ["--effort", "max"]
+    args += ["--allowedTools", "Read", "-p", "Produce the deep summary."]
+
     async for chunk in claude_subprocess.run_streaming(
-        ["--model", "opus", "--effort", "max",
-         "--allowedTools", "Read",
-         "-p", "Produce the deep summary."],
+        args,
         stdin_text=prompt,
     ):
         yield chunk

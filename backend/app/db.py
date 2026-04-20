@@ -35,8 +35,17 @@ CREATE TABLE IF NOT EXISTS conversations (
     arxiv_id    TEXT NOT NULL REFERENCES papers(arxiv_id),
     role        TEXT NOT NULL,
     content     TEXT NOT NULL,
+    thread_id   INTEGER NOT NULL DEFAULT 1,
     created_at  TEXT DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS threads (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    arxiv_id    TEXT NOT NULL REFERENCES papers(arxiv_id),
+    title       TEXT NOT NULL DEFAULT 'Conversation',
+    created_at  TEXT DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_threads_arxiv ON threads(arxiv_id);
 
 CREATE TABLE IF NOT EXISTS prefs (
     key    TEXT PRIMARY KEY,
@@ -52,6 +61,7 @@ CREATE TABLE IF NOT EXISTS events (
 CREATE INDEX IF NOT EXISTS idx_events_ts ON events(ts);
 CREATE INDEX IF NOT EXISTS idx_papers_published ON papers(published);
 CREATE INDEX IF NOT EXISTS idx_conv_arxiv      ON conversations(arxiv_id);
+CREATE INDEX IF NOT EXISTS idx_conv_thread     ON conversations(arxiv_id, thread_id);
 """
 
 
@@ -68,9 +78,20 @@ def db_path() -> Path:
 
 
 def init() -> None:
-    """Create the database file and all tables if they don't exist."""
+    """Create the database file and all tables if they don't exist.
+
+    Also runs lightweight in-place migrations for older databases that pre-date
+    a column. This is safe because Atlas is local single-user data.
+    """
     with sqlite3.connect(db_path()) as conn:
         conn.executescript(SCHEMA)
+        # Migration: add conversations.thread_id if missing on a pre-existing DB.
+        try:
+            conn.execute(
+                "ALTER TABLE conversations ADD COLUMN thread_id INTEGER NOT NULL DEFAULT 1"
+            )
+        except sqlite3.OperationalError:
+            pass  # column already exists
 
 
 @contextmanager

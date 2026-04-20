@@ -1,4 +1,8 @@
 import { useEffect, useRef } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
 
 type Props = {
   role: "user" | "assistant";
@@ -19,10 +23,10 @@ export function StreamingMessage({ role, content, isStreaming }: Props) {
     <div ref={ref} className={`flex fade-up ${isUser ? "justify-end" : "justify-start"}`}>
       <div
         className={[
-          "max-w-[90%] rounded-xl px-3 py-2 text-[13px] leading-relaxed whitespace-pre-wrap",
+          "max-w-[90%] rounded-xl px-3 py-2 text-[13px] leading-relaxed",
           isUser
-            ? "text-[color:var(--user-ink)] font-medium"
-            : "bg-white/[0.04] border border-white/5 text-slate-200",
+            ? "text-[color:var(--user-ink)] font-medium whitespace-pre-wrap"
+            : "bg-white/[0.04] border border-white/5 text-slate-200 markdown-body",
         ].join(" ")}
         style={isUser ? { background: "var(--user-grad)" } : undefined}
       >
@@ -39,9 +43,16 @@ export function StreamingMessage({ role, content, isStreaming }: Props) {
               <span className="w-1 h-1 rounded-full bg-current animate-bounce" style={{ animationDelay: "300ms" }} />
             </span>
           </span>
+        ) : isUser ? (
+          content
         ) : (
           <>
-            {content}
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm, remarkMath]}
+              rehypePlugins={[rehypeKatex]}
+            >
+              {content}
+            </ReactMarkdown>
             {isStreaming && (
               <span
                 className="inline-block ml-1 w-1.5 h-3 bg-current opacity-60 align-middle animate-pulse"

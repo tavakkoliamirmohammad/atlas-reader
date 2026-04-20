@@ -114,20 +114,32 @@ async def get_stats() -> dict:
 class AskBody(BaseModel):
     question: str
     history: list[dict] = []
+    model: str | None = None
 
 
 def _sse_format(chunk: str) -> bytes:
     return f"data: {chunk}\n\n".encode("utf-8")
 
 
+_ALLOWED_MODELS = {"opus", "sonnet", "haiku"}
+
+
+def _normalize_model(value: str | None, default: str) -> str:
+    if value and value in _ALLOWED_MODELS:
+        return value
+    return default
+
+
 @app.post("/api/summarize/{arxiv_id}")
-async def post_summarize(arxiv_id: str):
+async def post_summarize(arxiv_id: str, model: str | None = None):
     if papers.get(arxiv_id) is None:
         raise HTTPException(status_code=404, detail="paper not found")
 
+    chosen = _normalize_model(model, "opus")
+
     async def gen():
         try:
-            async for chunk in summarizer.summarize(arxiv_id):
+            async for chunk in summarizer.summarize(arxiv_id, model=chosen):
                 yield _sse_format(chunk)
             yield b"event: done\ndata: ok\n\n"
         except Exception as exc:
@@ -137,13 +149,16 @@ async def post_summarize(arxiv_id: str):
 
 
 @app.post("/api/ask/{arxiv_id}")
-async def post_ask(arxiv_id: str, body: AskBody):
+async def post_ask(arxiv_id: str, body: AskBody, model: str | None = None):
     if papers.get(arxiv_id) is None:
         raise HTTPException(status_code=404, detail="paper not found")
 
+    # Prefer query param for consistency, fall back to body.
+    chosen = _normalize_model(model if model is not None else body.model, "sonnet")
+
     async def gen():
         try:
-            async for chunk in asker.ask(arxiv_id, body.question, body.history):
+            async for chunk in asker.ask(arxiv_id, body.question, body.history, model=chosen):
                 yield _sse_format(chunk)
             yield b"event: done\ndata: ok\n\n"
         except Exception as exc:

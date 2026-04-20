@@ -16,9 +16,17 @@ export const PALETTES: Palette[] = [
 ];
 
 export const DEFAULT_PALETTE_ID = "cyan-emerald";
+export const CUSTOM_PALETTE_ID = "custom";
+
+export const INK_LIGHT = "#06121a";
+export const INK_DARK = "#0b0f17";
 
 export function getPaletteById(id: string): Palette | undefined {
   return PALETTES.find((p) => p.id === id);
+}
+
+export function buildCustomPalette(c1: string, c2: string, ink: string): Palette {
+  return { id: CUSTOM_PALETTE_ID, name: "Custom", c1, c2, ink };
 }
 
 function hexToRgb(hex: string): [number, number, number] {

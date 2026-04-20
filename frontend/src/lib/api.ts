@@ -31,12 +31,18 @@ export const api = {
 
 export type ChatMessage = { role: "user" | "assistant" | "system"; content: string };
 
+export type ModelChoice = "opus" | "sonnet" | "haiku";
+
 export async function streamSummary(
   arxivId: string,
   handlers: SSEHandlers,
   signal?: AbortSignal,
+  model?: ModelChoice,
 ): Promise<void> {
-  return streamSSE(`/api/summarize/${arxivId}`, { method: "POST" }, handlers, signal);
+  const url = model
+    ? `/api/summarize/${arxivId}?model=${model}`
+    : `/api/summarize/${arxivId}`;
+  return streamSSE(url, { method: "POST" }, handlers, signal);
 }
 
 export async function streamAsk(
@@ -45,9 +51,13 @@ export async function streamAsk(
   history: ChatMessage[],
   handlers: SSEHandlers,
   signal?: AbortSignal,
+  model?: ModelChoice,
 ): Promise<void> {
+  const url = model
+    ? `/api/ask/${arxivId}?model=${model}`
+    : `/api/ask/${arxivId}`;
   return streamSSE(
-    `/api/ask/${arxivId}`,
+    url,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },

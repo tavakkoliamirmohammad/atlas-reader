@@ -30,6 +30,8 @@ async def ask(
     arxiv_id: str,
     question: str,
     history: List[ChatMessage],
+    model: str = "sonnet",
+    thread_id: int = conversations.DEFAULT_THREAD_ID,
 ) -> AsyncIterator[str]:
     """Yield chunks of the answer; persist user msg up-front, assistant on success."""
     if papers.get(arxiv_id) is None:
@@ -45,14 +47,14 @@ async def ask(
         f"\n\nUSER QUESTION: {question}\n"
     )
 
-    conversations.append(arxiv_id, "user", question)
+    conversations.append(arxiv_id, "user", question, thread_id=thread_id)
 
     collected: list[str] = []
     async for chunk in claude_subprocess.run_streaming(
-        ["--model", "sonnet", "--allowedTools", "Read", "-p", "Answer the question."],
+        ["--model", model, "--allowedTools", "Read", "-p", "Answer the question."],
         stdin_text=prompt,
     ):
         collected.append(chunk)
         yield chunk
 
-    conversations.append(arxiv_id, "assistant", "".join(collected))
+    conversations.append(arxiv_id, "assistant", "".join(collected), thread_id=thread_id)

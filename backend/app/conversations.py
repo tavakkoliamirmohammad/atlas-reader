@@ -1,4 +1,4 @@
-"""Per-paper chat history repository (conversations table)."""
+"""Per-paper chat history repository (conversations + threads tables)."""
 
 from __future__ import annotations
 
@@ -10,22 +10,65 @@ from app import db
 
 Role = Literal["user", "assistant", "system"]
 
+# Default thread used when callers don't specify one. All historical rows
+# (created before multi-thread support landed) get thread_id=1 via the
+# schema default and the on-disk migration in db.init().
+DEFAULT_THREAD_ID = 1
 
-def append(arxiv_id: str, role: Role, content: str) -> None:
-    """Append a message row to the conversations table."""
+
+def append(arxiv_id: str, role: Role, content: str, thread_id: int = DEFAULT_THREAD_ID) -> None:
+    """Append a message row to the conversations table for a specific thread."""
     with db.connect() as conn:
         conn.execute(
-            "INSERT INTO conversations (arxiv_id, role, content) VALUES (?, ?, ?)",
-            (arxiv_id, role, content),
+            "INSERT INTO conversations (arxiv_id, role, content, thread_id) "
+            "VALUES (?, ?, ?, ?)",
+            (arxiv_id, role, content, thread_id),
         )
 
 
-def history(arxiv_id: str) -> List[sqlite3.Row]:
-    """Return all messages for the given paper, oldest first."""
+def history(arxiv_id: str, thread_id: int = DEFAULT_THREAD_ID) -> List[sqlite3.Row]:
+    """Return all messages for the given paper + thread, oldest first."""
     with db.connect() as conn:
         cur = conn.execute(
-            "SELECT id, arxiv_id, role, content, created_at "
-            "FROM conversations WHERE arxiv_id = ? ORDER BY id ASC",
-            (arxiv_id,),
+            "SELECT id, arxiv_id, role, content, thread_id, created_at "
+            "FROM conversations WHERE arxiv_id = ? AND thread_id = ? ORDER BY id ASC",
+            (arxiv_id, thread_id),
         )
         return list(cur.fetchall())
+
+
+def list_threads(arxiv_id: str) -> List[sqlite3.Row]:
+    """Return threads for a paper, oldest first.
+
+    Always includes a synthetic default thread (id=1) so the UI has at least
+    one tab even before the user explicitly creates a new thread.
+    """
+    with db.connect() as conn:
+        cur = conn.execute(
+            "SELECT id, arxiv_id, title, created_at "
+            "FROM threads WHERE arxiv_id = ? ORDER BY id ASC",
+            (arxiv_id,),
+        )
+        rows = list(cur.fetchall())
+
+    if any(r["id"] == DEFAULT_THREAD_ID for r in rows):
+        return rows
+
+    # Synthesize the default thread row at the front of the list.
+    default_row = {
+        "id": DEFAULT_THREAD_ID,
+        "arxiv_id": arxiv_id,
+        "title": "Conversation",
+        "created_at": None,
+    }
+    return [default_row, *rows]
+
+
+def create_thread(arxiv_id: str, title: str = "Conversation") -> int:
+    """Create a new thread for a paper and return its id."""
+    with db.connect() as conn:
+        cur = conn.execute(
+            "INSERT INTO threads (arxiv_id, title) VALUES (?, ?)",
+            (arxiv_id, title),
+        )
+        return int(cur.lastrowid)
