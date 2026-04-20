@@ -76,22 +76,24 @@ export function Glossary({ arxivId }: Props) {
     }
   }
 
+  function fetchDefinition(term: string) {
+    setDefs((d) => ({ ...d, [term]: { status: "loading" } }));
+    fetchGlossaryDefinition(arxivId, term)
+      .then((text) => setDefs((d) => ({ ...d, [term]: { status: "ready", text } })))
+      .catch((e) => {
+        const raw = e instanceof Error ? e.message : String(e);
+        const message = raw.length > 80 ? raw.slice(0, 77) + "…" : raw;
+        setDefs((d) => ({ ...d, [term]: { status: "error", message } }));
+      });
+  }
+
   function scheduleHover(term: string) {
     if (hoverTimerRef.current !== null) window.clearTimeout(hoverTimerRef.current);
     hoverTimerRef.current = window.setTimeout(() => {
       setHoveredTerm(term);
       const cur = defs[term];
-      if (!cur || cur.status === "error") {
-        setDefs((d) => ({ ...d, [term]: { status: "loading" } }));
-        fetchGlossaryDefinition(arxivId, term)
-          .then((text) => setDefs((d) => ({ ...d, [term]: { status: "ready", text } })))
-          .catch((e) =>
-            setDefs((d) => ({
-              ...d,
-              [term]: { status: "error", message: String(e) },
-            })),
-          );
-      }
+      // Auto-fetch on first hover; on error, the user clicks Retry instead.
+      if (!cur) fetchDefinition(term);
     }, HOVER_DELAY_MS);
   }
 
@@ -158,12 +160,24 @@ export function Glossary({ arxivId }: Props) {
                   role="tooltip"
                   className="absolute z-50 left-0 top-full mt-1 w-64 max-w-[18rem] px-2.5 py-1.5 rounded-md text-[11px] leading-snug bg-slate-900/95 border border-white/10 text-slate-200 shadow-lg"
                 >
-                  {!def || def.status === "idle" ? (
+                  {!def || def.status === "idle" || def.status === "loading" ? (
                     <span className="text-slate-400">Loading…</span>
                   ) : def.status === "ready" ? (
                     <span>{def.text}</span>
                   ) : (
-                    <span className="text-rose-300">error</span>
+                    <div className="flex flex-col gap-1.5">
+                      <span className="text-rose-300 break-words">
+                        error: {def.message}
+                      </span>
+                      <button
+                        type="button"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => fetchDefinition(t.term)}
+                        className="self-start px-1.5 py-0.5 rounded text-[10px] font-semibold text-slate-200 bg-white/5 border border-white/10 hover:bg-white/10 hover:border-[color:var(--ac1-mid)] cursor-pointer transition-colors"
+                      >
+                        Retry
+                      </button>
+                    </div>
                   )}
                 </div>
               )}
