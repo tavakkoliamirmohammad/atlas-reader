@@ -19,6 +19,28 @@ function colorBar(c: HighlightColor): string {
   return COLORS.find((x) => x.id === c)?.bar ?? COLORS[0].bar;
 }
 
+/**
+ * Guardrails for the clipboard auto-fill. We don't want to shove a shell
+ * command or a multi-screen blob into the highlight quote field just because
+ * the user happened to have it on their clipboard. Simple heuristics only —
+ * anything actually malicious will still get dropped in, but the common
+ * "oops, my last Cmd+C was a terminal command" case is covered.
+ */
+function looksSuspicious(text: string): boolean {
+  if (text.length > 1500) return true;
+  // Many newlines suggests it's not a quote from a paper.
+  const newlines = (text.match(/\n/g) ?? []).length;
+  if (newlines > 8) return true;
+  const lower = text.trimStart().toLowerCase();
+  if (lower.startsWith("#!")) return true;
+  if (lower.startsWith("sudo ")) return true;
+  if (lower.startsWith("curl ")) return true;
+  if (lower.startsWith("http://") || lower.startsWith("https://")) return true;
+  return false;
+}
+
+const BANNER_AUTO_DISMISS_MS = 3000;
+
 export function HighlightsPanel() {
   const match = useMatch("/reader/:arxivId");
   const arxivId = match?.params.arxivId;
@@ -29,7 +51,9 @@ export function HighlightsPanel() {
   const [draftQuote, setDraftQuote] = useState("");
   const [draftColor, setDraftColor] = useState<HighlightColor>("yellow");
   const [saving, setSaving] = useState(false);
+  const [clipboardBanner, setClipboardBanner] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const bannerTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (!arxivId) {
@@ -44,7 +68,15 @@ export function HighlightsPanel() {
   }, [arxivId]);
 
   useEffect(() => {
-    if (!adding) return;
+    if (!adding) {
+      // Clean up the banner dismiss timer when the draft closes.
+      if (bannerTimerRef.current !== null) {
+        window.clearTimeout(bannerTimerRef.current);
+        bannerTimerRef.current = null;
+      }
+      setClipboardBanner(false);
+      return;
+    }
     setTimeout(() => textareaRef.current?.focus(), 0);
     // Try to auto-prefill from the clipboard. The iframe PDF viewer doesn't
     // expose selection to JS, but the user can Cmd+C inside it and we read
@@ -52,11 +84,27 @@ export function HighlightsPanel() {
     if (draftQuote === "" && navigator.clipboard?.readText) {
       navigator.clipboard.readText().then((text) => {
         const trimmed = text?.trim();
-        if (trimmed && trimmed.length < 4000) setDraftQuote(trimmed);
+        if (!trimmed) return;
+        // Bail out on content that looks like a shell command or a giant
+        // blob — almost certainly not a quote the user wants to highlight.
+        if (looksSuspicious(trimmed)) return;
+        setDraftQuote(trimmed);
+        setClipboardBanner(true);
+        if (bannerTimerRef.current !== null) window.clearTimeout(bannerTimerRef.current);
+        bannerTimerRef.current = window.setTimeout(() => {
+          setClipboardBanner(false);
+          bannerTimerRef.current = null;
+        }, BANNER_AUTO_DISMISS_MS);
       }).catch(() => { /* clipboard permission denied — silent */ });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [adding]);
+
+  useEffect(() => {
+    return () => {
+      if (bannerTimerRef.current !== null) window.clearTimeout(bannerTimerRef.current);
+    };
+  }, []);
 
   if (!arxivId) return null;
 
@@ -147,10 +195,27 @@ export function HighlightsPanel() {
         <div className="px-3 pb-3 flex flex-col gap-2">
           {adding && (
             <div className="rounded-lg border border-white/10 bg-white/[0.03] p-2 flex flex-col gap-2">
+              {clipboardBanner && (
+                <div
+                  role="status"
+                  className="text-[10px] text-amber-300/80 px-1 leading-snug"
+                >
+                  Filled from clipboard — ⌘Z to undo, or click Cancel
+                </div>
+              )}
               <textarea
                 ref={textareaRef}
                 value={draftQuote}
-                onChange={(e) => setDraftQuote(e.target.value)}
+                onChange={(e) => {
+                  setDraftQuote(e.target.value);
+                  if (clipboardBanner) {
+                    setClipboardBanner(false);
+                    if (bannerTimerRef.current !== null) {
+                      window.clearTimeout(bannerTimerRef.current);
+                      bannerTimerRef.current = null;
+                    }
+                  }
+                }}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
                     e.preventDefault();
