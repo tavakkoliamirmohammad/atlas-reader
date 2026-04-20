@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
@@ -127,6 +127,36 @@ export function StreamingMessage({ role, content, isStreaming, model }: Props) {
   const isUser = role === "user";
   const showLoading = isStreaming && !content;
 
+  // Track elapsed seconds while the "Thinking" placeholder is visible. We
+  // record a start timestamp when showLoading flips to true, then tick at 1Hz.
+  // Below 3s we show a plain "Thinking" (avoids flicker on fast responses);
+  // from 3s we append the count, and from 15s we add a reassurance note that
+  // Opus can legitimately take a while.
+  const [elapsed, setElapsed] = useState(0);
+  const startedAtRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!showLoading) {
+      startedAtRef.current = null;
+      setElapsed(0);
+      return;
+    }
+    startedAtRef.current = Date.now();
+    setElapsed(0);
+    const id = window.setInterval(() => {
+      if (startedAtRef.current !== null) {
+        setElapsed(Math.floor((Date.now() - startedAtRef.current) / 1000));
+      }
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [showLoading]);
+
+  let thinkingLabel = "Thinking";
+  if (showLoading && elapsed >= 15) {
+    thinkingLabel = `Thinking ${elapsed}s · Opus can take a moment`;
+  } else if (showLoading && elapsed >= 3) {
+    thinkingLabel = `Thinking ${elapsed}s`;
+  }
+
   return (
     <div ref={ref} className={`flex fade-up ${isUser ? "justify-end" : "justify-start"}`}>
       <div
@@ -149,7 +179,7 @@ export function StreamingMessage({ role, content, isStreaming, model }: Props) {
               className="inline-block w-3 h-3 rounded-full border-2 border-current border-t-transparent animate-spin"
               aria-hidden
             />
-            <span>Thinking</span>
+            <span>{thinkingLabel}</span>
             <span className="inline-flex gap-0.5">
               <span className="w-1 h-1 rounded-full bg-current animate-bounce" style={{ animationDelay: "0ms" }} />
               <span className="w-1 h-1 rounded-full bg-current animate-bounce" style={{ animationDelay: "150ms" }} />
