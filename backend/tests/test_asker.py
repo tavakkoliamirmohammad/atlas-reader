@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import AsyncMock, patch
 
-from app import asker, conversations, db, papers
+from app import asker, db, papers
 from app.arxiv import Paper
 
 
@@ -9,7 +9,7 @@ SAMPLE = Paper("7", "T", "A", "x", "cs.PL", "2026-04-19T08:00:00Z")
 
 
 @pytest.mark.asyncio
-async def test_ask_yields_chunks_and_persists_messages(atlas_data_dir):
+async def test_ask_yields_chunks(atlas_data_dir):
     db.init()
     papers.upsert([SAMPLE])
 
@@ -22,12 +22,6 @@ async def test_ask_yields_chunks_and_persists_messages(atlas_data_dir):
             chunks = [c async for c in asker.ask("7", "What is X?", history=[])]
 
     assert "".join(chunks) == "X is a thing.\n"
-
-    h = conversations.history("7")
-    assert [(r["role"], r["content"]) for r in h] == [
-        ("user", "What is X?"),
-        ("assistant", "X is a thing.\n"),
-    ]
 
 
 @pytest.mark.asyncio
@@ -77,7 +71,7 @@ async def test_ask_passes_model_arg(atlas_data_dir):
 
 
 @pytest.mark.asyncio
-async def test_ask_does_not_persist_assistant_on_subprocess_failure(atlas_data_dir):
+async def test_ask_propagates_subprocess_error(atlas_data_dir):
     db.init()
     papers.upsert([SAMPLE])
 
@@ -91,6 +85,3 @@ async def test_ask_does_not_persist_assistant_on_subprocess_failure(atlas_data_d
             with pytest.raises(Exception):
                 async for _ in asker.ask("7", "Q", history=[]):
                     pass
-
-    h = conversations.history("7")
-    assert [r["role"] for r in h] == ["user"]

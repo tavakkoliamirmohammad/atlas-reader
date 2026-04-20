@@ -9,7 +9,11 @@ from app.main import app
 
 @pytest.mark.asyncio
 async def test_full_ai_round_trip(atlas_data_dir, fixtures_dir):
-    """Build digest with AI tiering, summarize one paper, ask a follow-up. Verify persistence."""
+    """Build digest with AI tiering, summarize one paper, ask a follow-up.
+
+    Chat is now ephemeral (no DB writes from the asker), so /api/conversations
+    returns an empty list — that's the expected behavior, not a bug.
+    """
     db.init()
 
     pl = [Paper("zz", "MLIR Linalg", "A", "abstract", "cs.PL", "2026-04-19T08:00:00Z")]
@@ -49,10 +53,10 @@ async def test_full_ai_round_trip(atlas_data_dir, fixtures_dir):
             s = await c.post("/api/summarize/zz")
             assert "data: ## 1. Background" in s.text
 
-            # Ask -> SSE stream + persisted history
+            # Ask -> SSE stream (ephemeral, no DB write)
             a = await c.post("/api/ask/zz", json={"question": "Why?", "history": []})
             assert "data: answer" in a.text
 
             conv = await c.get("/api/conversations/zz")
             roles = [m["role"] for m in conv.json()["messages"]]
-            assert roles == ["user", "assistant"]
+            assert roles == []

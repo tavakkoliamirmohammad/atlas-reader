@@ -7,7 +7,11 @@ from app import claude_subprocess as cs
 @pytest.mark.asyncio
 async def test_run_streaming_yields_stdout_chunks_and_returns_zero():
     fake_proc = MagicMock()
-    fake_proc.stdout.readline = AsyncMock(side_effect=[b"hello ", b"world\n", b""])
+    fake_proc.stdout.readline = AsyncMock(side_effect=[
+        b'{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"hello "}}}\n',
+        b'{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"world\\n"}}}\n',
+        b"",
+    ])
     fake_proc.wait = AsyncMock(return_value=0)
     fake_proc.returncode = 0
 
