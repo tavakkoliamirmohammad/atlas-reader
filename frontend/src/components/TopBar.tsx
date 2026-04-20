@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { ThemePicker } from "./ThemePicker";
 import { PanelToggles } from "./PanelToggles";
 import { AiStatusPill } from "./AiStatusPill";
+import { Greeting } from "./Greeting";
+import { Streak } from "./Streak";
 import { api } from "@/lib/api";
 
 export function TopBar() {
@@ -20,11 +22,13 @@ export function TopBar() {
           A
         </div>
         <div className="text-sm font-semibold text-slate-100">Atlas</div>
+        <Greeting />
       </div>
       <div className="flex-1" />
       <ThemePicker />
       <PanelToggles />
       <AiStatusPill ai={ai} />
+      <Streak />
     </div>
   );
 }
