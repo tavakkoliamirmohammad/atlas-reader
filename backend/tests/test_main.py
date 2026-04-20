@@ -240,3 +240,32 @@ async def test_conversations_endpoint_returns_history(atlas_data_dir):
     assert [(m["role"], m["content"]) for m in msgs] == [
         ("user", "Q"), ("assistant", "A"),
     ]
+
+
+@pytest.mark.asyncio
+async def test_build_progress_emits_sse_events_from_builds_log(atlas_data_dir):
+    db.init()
+    with db.connect() as conn:
+        conn.execute(
+            "INSERT INTO builds (date, status, log) VALUES (?, ?, ?)",
+            ("2026-04-19", "done",
+             "Fetching arXiv...\nRanking with Sonnet...\nSummarizing 5/30...\ndone"),
+        )
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        async with c.stream("GET", "/api/build-progress?date=2026-04-19") as r:
+            body = b""
+            async for chunk in r.aiter_bytes():
+                body += chunk
+    text = body.decode()
+    assert "Fetching arXiv..." in text
+    assert "Ranking with Sonnet..." in text
+    assert "Summarizing 5/30..." in text
+    assert "event: done" in text
+
+
+@pytest.mark.asyncio
+async def test_build_progress_returns_404_when_no_build_for_date(atlas_data_dir):
+    db.init()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        r = await c.get("/api/build-progress?date=2099-01-01")
+    assert r.status_code == 404

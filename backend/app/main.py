@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import os
 from contextlib import asynccontextmanager
@@ -118,6 +119,40 @@ async def post_ask(arxiv_id: str, body: AskBody):
 async def get_conversations(arxiv_id: str) -> dict:
     rows = conversations.history(arxiv_id)
     return {"messages": [_row_to_dict(r) for r in rows]}
+
+
+def _build_row(date_str: str):
+    with db.connect() as conn:
+        cur = conn.execute("SELECT status, log FROM builds WHERE date = ?", (date_str,))
+        return cur.fetchone()
+
+
+async def _build_progress_events(date_str: str):
+    """Emit one SSE event per line of the build's log; emit terminal event at end."""
+    emitted = 0
+    while True:
+        row = _build_row(date_str)
+        if row is None:
+            return
+        lines = (row["log"] or "").splitlines()
+        for line in lines[emitted:]:
+            yield f"data: {line}\n\n"
+        emitted = len(lines)
+        if row["status"] in ("done", "failed"):
+            yield f"event: {row['status']}\ndata: {row['status']}\n\n"
+            return
+        await asyncio.sleep(0.25)
+
+
+@app.get("/api/build-progress")
+async def get_build_progress(date: str):
+    if _build_row(date) is None:
+        raise HTTPException(status_code=404, detail="no build for that date")
+    return StreamingResponse(
+        _build_progress_events(date),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache"},
+    )
 
 
 def _frontend_dist() -> Path | None:
