@@ -35,17 +35,8 @@ CREATE TABLE IF NOT EXISTS conversations (
     arxiv_id    TEXT NOT NULL REFERENCES papers(arxiv_id),
     role        TEXT NOT NULL,
     content     TEXT NOT NULL,
-    thread_id   INTEGER NOT NULL DEFAULT 1,
     created_at  TEXT DEFAULT CURRENT_TIMESTAMP
 );
-
-CREATE TABLE IF NOT EXISTS threads (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    arxiv_id    TEXT NOT NULL REFERENCES papers(arxiv_id),
-    title       TEXT NOT NULL DEFAULT 'Conversation',
-    created_at  TEXT DEFAULT CURRENT_TIMESTAMP
-);
-CREATE INDEX IF NOT EXISTS idx_threads_arxiv ON threads(arxiv_id);
 
 CREATE TABLE IF NOT EXISTS prefs (
     key    TEXT PRIMARY KEY,
@@ -82,7 +73,6 @@ CREATE INDEX IF NOT EXISTS idx_glossary_arxiv ON glossary(arxiv_id);
 CREATE INDEX IF NOT EXISTS idx_events_ts ON events(ts);
 CREATE INDEX IF NOT EXISTS idx_papers_published ON papers(published);
 CREATE INDEX IF NOT EXISTS idx_conv_arxiv      ON conversations(arxiv_id);
-CREATE INDEX IF NOT EXISTS idx_conv_thread     ON conversations(arxiv_id, thread_id);
 
 CREATE VIRTUAL TABLE IF NOT EXISTS papers_fts USING fts5(
     arxiv_id UNINDEXED,
@@ -130,13 +120,6 @@ def init() -> None:
     """
     with sqlite3.connect(db_path()) as conn:
         conn.executescript(SCHEMA)
-        # Migration: add conversations.thread_id if missing on a pre-existing DB.
-        try:
-            conn.execute(
-                "ALTER TABLE conversations ADD COLUMN thread_id INTEGER NOT NULL DEFAULT 1"
-            )
-        except sqlite3.OperationalError:
-            pass  # column already exists
 
         # Backfill papers_fts from existing rows when the FTS index is empty
         # but the papers table has data (older DBs created before FTS5 existed).

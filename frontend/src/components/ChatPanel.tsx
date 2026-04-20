@@ -2,9 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import { useMatch } from "react-router-dom";
 import {
   type ChatMessage,
-  type Thread,
-  createThread,
-  fetchThreads,
   streamAsk,
   streamSummary,
 } from "@/lib/api";
@@ -12,8 +9,6 @@ import { StreamingMessage } from "./StreamingMessage";
 import { QuickActionChips } from "./QuickActionChips";
 import { Glossary } from "./Glossary";
 import { useUiStore, type ModelChoice } from "@/stores/ui-store";
-
-const DEFAULT_THREAD_ID = 1;
 
 const MODEL_META: Record<ModelChoice, { label: string; tag: string }> = {
   opus:   { label: "Opus",   tag: "deepest"  },
@@ -90,95 +85,24 @@ function ModelPicker({
   );
 }
 
-function ThreadTabs({
-  threads, activeId, onSwitch, onNew, disabled,
-}: {
-  threads: Thread[];
-  activeId: number;
-  onSwitch: (id: number) => void;
-  onNew: () => void;
-  disabled?: boolean;
-}) {
-  return (
-    <div className="flex items-end gap-0.5 px-3 pt-1.5 border-b border-white/5 overflow-x-auto">
-      {threads.map((t) => {
-        const active = t.id === activeId;
-        const truncated = t.title.length > 18 ? t.title.slice(0, 17) + "\u2026" : t.title;
-        return (
-          <button
-            key={t.id}
-            type="button"
-            onClick={() => onSwitch(t.id)}
-            disabled={disabled}
-            title={t.title}
-            aria-selected={active}
-            role="tab"
-            className={[
-              "px-2.5 py-1 text-[11px] font-medium whitespace-nowrap cursor-pointer",
-              "transition-colors disabled:opacity-40 disabled:cursor-not-allowed",
-              "border-b-2",
-              active
-                ? "text-slate-100 border-[color:var(--ac1-mid)]"
-                : "text-slate-500 border-transparent hover:text-slate-300",
-            ].join(" ")}
-          >
-            {truncated}
-          </button>
-        );
-      })}
-      <button
-        type="button"
-        onClick={onNew}
-        disabled={disabled}
-        aria-label="New conversation"
-        title="New conversation"
-        className="px-2 py-1 text-[11px] font-semibold text-slate-400 hover:text-slate-100 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed border-b-2 border-transparent"
-      >
-        + New
-      </button>
-    </div>
-  );
-}
-
 export function ChatPanel() {
   // useMatch climbs the URL directly, so this works even though ChatPanel
   // lives outside the <Routes> block (where useParams would return empty).
   const match = useMatch("/reader/:arxivId");
   const arxivId = match?.params.arxivId;
-  // Per-thread message lists. Ephemeral: lives only in React state.
-  // Switching tabs swaps which list is shown; switching papers clears them all.
-  const [messagesByThread, setMessagesByThread] = useState<Record<number, ChatMessage[]>>({
-    [DEFAULT_THREAD_ID]: [],
-  });
-  const [threads, setThreads] = useState<Thread[]>([
-    { id: DEFAULT_THREAD_ID, arxiv_id: "", title: "Conversation", created_at: null },
-  ]);
-  const [activeThreadId, setActiveThreadId] = useState<number>(DEFAULT_THREAD_ID);
+  // Single ephemeral conversation in React state. Per user privacy preference,
+  // no chat history is persisted anywhere — switching papers wipes it.
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [streaming, setStreaming] = useState(false);
   const [draft, setDraft] = useState("");
   const abortRef = useRef<AbortController | null>(null);
   const model = useUiStore((s) => s.model);
   const setModel = useUiStore((s) => s.setModel);
 
-  const messages = messagesByThread[activeThreadId] ?? [];
-
-  // On paper switch: wipe ephemeral messages, load thread list, default to thread 1.
-  // Per user privacy preference, no chat history is persisted anywhere.
+  // Wipe ephemeral messages on paper switch.
   useEffect(() => {
     if (!arxivId) return;
-    setMessagesByThread({ [DEFAULT_THREAD_ID]: [] });
-    setActiveThreadId(DEFAULT_THREAD_ID);
-    fetchThreads(arxivId)
-      .then((ts) => {
-        setThreads(ts.length ? ts : [
-          { id: DEFAULT_THREAD_ID, arxiv_id: arxivId, title: "Conversation", created_at: null },
-        ]);
-      })
-      .catch(() => {
-        setThreads([
-          { id: DEFAULT_THREAD_ID, arxiv_id: arxivId, title: "Conversation", created_at: null },
-        ]);
-      });
+    setMessages([]);
     return () => { abortRef.current?.abort(); };
   }, [arxivId]);
 
@@ -190,15 +114,8 @@ export function ChatPanel() {
     );
   }
 
-  function setMessagesForActive(updater: (prev: ChatMessage[]) => ChatMessage[]) {
-    setMessagesByThread((all) => {
-      const prev = all[activeThreadId] ?? [];
-      return { ...all, [activeThreadId]: updater(prev) };
-    });
-  }
-
   function appendChunk(chunk: string) {
-    setMessagesForActive((prev) => {
+    setMessages((prev) => {
       const copy = [...prev];
       const last = copy[copy.length - 1];
       if (last && last.role === "assistant") {
@@ -214,9 +131,8 @@ export function ChatPanel() {
     if (!arxivId || !draft.trim() || streaming) return;
     const question = draft.trim();
     const historyForBackend = messages;
-    const threadIdAtSend = activeThreadId;
     setDraft("");
-    setMessagesForActive((m) => [
+    setMessages((m) => [
       ...m,
       { role: "user", content: question },
       { role: "assistant", content: "", model },
@@ -228,7 +144,7 @@ export function ChatPanel() {
         onChunk: appendChunk,
         onDone: () => setStreaming(false),
         onError: (e) => { appendChunk(`\n\n[error: ${e}]`); setStreaming(false); },
-      }, abortRef.current.signal, model, threadIdAtSend);
+      }, abortRef.current.signal, model);
     } catch (e) {
       setStreaming(false);
     }
@@ -236,7 +152,7 @@ export function ChatPanel() {
 
   async function summarize() {
     if (!arxivId || streaming) return;
-    setMessagesForActive((m) => [...m, { role: "assistant", content: "", model }]);
+    setMessages((m) => [...m, { role: "assistant", content: "", model }]);
     setStreaming(true);
     abortRef.current = new AbortController();
     try {
@@ -257,27 +173,6 @@ export function ChatPanel() {
     }, 0);
   }
 
-  async function newThread() {
-    if (!arxivId || streaming) return;
-    const nextNumber = threads.length + 1;
-    const title = `Conversation ${nextNumber}`;
-    try {
-      const t = await createThread(arxivId, title);
-      setThreads((prev) => [...prev, t]);
-      setMessagesByThread((all) => ({ ...all, [t.id]: [] }));
-      setActiveThreadId(t.id);
-    } catch {
-      // Fail silently; the user can retry.
-    }
-  }
-
-  function switchThread(id: number) {
-    if (id === activeThreadId || streaming) return;
-    abortRef.current?.abort();
-    setActiveThreadId(id);
-    setMessagesByThread((all) => (all[id] ? all : { ...all, [id]: [] }));
-  }
-
   return (
     <div className="flex flex-col h-full">
       <div className="flex items-center gap-2 px-4 py-3 border-b border-white/5">
@@ -290,13 +185,6 @@ export function ChatPanel() {
         <div className="font-semibold text-[15px] text-slate-100">Ask about this paper</div>
       </div>
       <Glossary arxivId={arxivId} />
-      <ThreadTabs
-        threads={threads}
-        activeId={activeThreadId}
-        onSwitch={switchThread}
-        onNew={newThread}
-        disabled={streaming}
-      />
       <div className="px-3 py-2.5 border-b border-white/5">
         <div className="text-[10px] uppercase tracking-wider text-slate-500 mb-1.5">Quick actions</div>
         <QuickActionChips onSummarize={summarize} onQuickAsk={quickAsk} disabled={streaming} />

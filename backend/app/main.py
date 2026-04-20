@@ -156,8 +156,6 @@ async def post_ask(
     arxiv_id: str,
     body: AskBody,
     model: str | None = None,
-    thread_id: int = 1,  # noqa: ARG001 - accepted for forward-compat with the
-    # multi-thread UI; asker is currently ephemeral so no DB write happens here.
 ):
     if papers.get(arxiv_id) is None:
         raise HTTPException(status_code=404, detail="paper not found")
@@ -177,31 +175,9 @@ async def post_ask(
 
 
 @app.get("/api/conversations/{arxiv_id}")
-async def get_conversations(arxiv_id: str, thread_id: int = 1) -> dict:
-    rows = conversations.history(arxiv_id, thread_id=thread_id)
+async def get_conversations(arxiv_id: str) -> dict:
+    rows = conversations.history(arxiv_id)
     return {"messages": [_row_to_dict(r) for r in rows]}
-
-
-@app.get("/api/threads/{arxiv_id}")
-async def get_threads(arxiv_id: str) -> dict:
-    rows = conversations.list_threads(arxiv_id)
-    return {
-        "threads": [
-            _row_to_dict(r) if hasattr(r, "keys") else dict(r) for r in rows
-        ]
-    }
-
-
-class CreateThreadBody(BaseModel):
-    title: str = "Conversation"
-
-
-@app.post("/api/threads/{arxiv_id}")
-async def post_thread(arxiv_id: str, body: CreateThreadBody) -> dict:
-    if papers.get(arxiv_id) is None:
-        raise HTTPException(status_code=404, detail="paper not found")
-    thread_id = conversations.create_thread(arxiv_id, body.title)
-    return {"id": thread_id, "arxiv_id": arxiv_id, "title": body.title}
 
 
 def _build_row(date_str: str):
