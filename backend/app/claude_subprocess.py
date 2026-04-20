@@ -61,11 +61,16 @@ async def run_streaming(
     """Spawn `claude` with `args` (plus streaming flags), yield text chunks as they arrive."""
     full_args = [*args, *_STREAM_FLAGS]
     async with _SEMAPHORE:
+        # limit=10MB: claude's stream-json `system` init event embeds the full
+        # session config (tool list, skills, etc.) and can exceed the asyncio
+        # StreamReader default of 64KB, which raises LimitOverrunError
+        # ("Separator is not found, and chunk exceed the limit").
         proc = await asyncio.create_subprocess_exec(
             "claude", *full_args,
             stdin=asyncio.subprocess.PIPE if stdin_text is not None else None,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            limit=10 * 1024 * 1024,
         )
         if stdin_text is not None and proc.stdin is not None:
             proc.stdin.write(stdin_text.encode("utf-8"))

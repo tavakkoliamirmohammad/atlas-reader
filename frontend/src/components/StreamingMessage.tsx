@@ -13,6 +13,8 @@ export function StreamingMessage({ role, content, isStreaming }: Props) {
   }, [content]);
 
   const isUser = role === "user";
+  const showLoading = isStreaming && !content;
+
   return (
     <div ref={ref} className={`flex fade-up ${isUser ? "justify-end" : "justify-start"}`}>
       <div
@@ -24,9 +26,29 @@ export function StreamingMessage({ role, content, isStreaming }: Props) {
         ].join(" ")}
         style={isUser ? { background: "var(--user-grad)" } : undefined}
       >
-        {content || (isStreaming ? <span className="opacity-60">...</span> : null)}
-        {isStreaming && content && (
-          <span className="inline-block ml-1 w-1.5 h-3 bg-current opacity-50 align-middle animate-pulse" />
+        {showLoading ? (
+          <span className="inline-flex items-center gap-2 text-slate-400 text-xs">
+            <span
+              className="inline-block w-3 h-3 rounded-full border-2 border-current border-t-transparent animate-spin"
+              aria-hidden
+            />
+            <span>Thinking</span>
+            <span className="inline-flex gap-0.5">
+              <span className="w-1 h-1 rounded-full bg-current animate-bounce" style={{ animationDelay: "0ms" }} />
+              <span className="w-1 h-1 rounded-full bg-current animate-bounce" style={{ animationDelay: "150ms" }} />
+              <span className="w-1 h-1 rounded-full bg-current animate-bounce" style={{ animationDelay: "300ms" }} />
+            </span>
+          </span>
+        ) : (
+          <>
+            {content}
+            {isStreaming && (
+              <span
+                className="inline-block ml-1 w-1.5 h-3 bg-current opacity-60 align-middle animate-pulse"
+                aria-hidden
+              />
+            )}
+          </>
         )}
       </div>
     </div>
