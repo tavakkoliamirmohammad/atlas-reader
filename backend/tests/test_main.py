@@ -32,7 +32,8 @@ async def test_health_endpoint_when_claude_missing(atlas_data_dir):
 async def test_digest_endpoint_triggers_build_and_returns_papers(atlas_data_dir):
     db.init()
     sample = [Paper("1", "T", "A", "x", "cs.PL", "2026-04-19T08:00:00Z")]
-    with patch("app.main.digest.build_today", new=AsyncMock(return_value=[])):
+    fake_build = AsyncMock(return_value=[])
+    with patch("app.main.digest.build_today", fake_build):
         with patch("app.main.papers.list_recent", return_value=sample):
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
                 r = await c.get("/api/digest?build=true")
@@ -40,6 +41,7 @@ async def test_digest_endpoint_triggers_build_and_returns_papers(atlas_data_dir)
     body = r.json()
     assert body["count"] == 1
     assert body["papers"][0]["arxiv_id"] == "1"
+    fake_build.assert_awaited_once()
 
 
 @pytest.mark.asyncio
