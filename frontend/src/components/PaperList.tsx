@@ -74,18 +74,17 @@ export function PaperList() {
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
+    // Clear the previous range's papers immediately so the user never sees a
+    // stale list during the switch — otherwise picking 3d after 7d keeps the
+    // 7d rows visible until the new fetch lands, which reads as "filter broken".
+    setPapers([]);
     (async () => {
       try {
-        let res = await api.digest(false, digestRange);
-        if (res.count === 0 && digestRange !== "all") {
-          // Only trigger a rebuild for narrow ranges. For wide ranges an
-          // empty result just means the DB really is that sparse.
-          res = await api.digest(true, digestRange);
-        }
+        const res = await api.digest(false, digestRange);
         if (!cancelled) {
           setPapers(res.papers);
-          // If the user is already viewing "all", we have everything we need
-          // to compute the counts for every segment — skip the extra fetch.
+          // If the user is on "all", we already have what we need to compute
+          // all-segment counts — skip the extra background fetch.
           if (digestRange === "all") {
             setRangeCounts(computeAllCounts(res.papers));
           }
@@ -281,9 +280,29 @@ export function PaperList() {
         tabIndex={flatPapers.length > 0 ? 0 : -1}
         onKeyDown={onKeyDown}
       >
-        {loading && <div className="px-4 py-3 text-xs text-slate-500">Loading...</div>}
+        {loading && (
+          <div className="flex flex-col items-center justify-center gap-3 py-16 text-slate-400">
+            <div
+              className="w-6 h-6 rounded-full border-2 border-white/10 animate-spin"
+              style={{ borderTopColor: "var(--ac1)" }}
+              aria-hidden
+            />
+            <div className="text-[11px] uppercase tracking-wider text-slate-500">
+              Loading {digestRange === "all" ? "archive" : `${digestRange}-day range`}
+            </div>
+          </div>
+        )}
         {!loading && papers.length === 0 && (
-          <div className="px-4 py-3 text-xs text-slate-500">No papers yet. Build the digest from the backend.</div>
+          <div className="flex flex-col items-center justify-center gap-2 py-16 px-6 text-center">
+            <div className="text-[13px] text-slate-300 font-medium">
+              No papers in this range
+            </div>
+            <div className="text-[11px] text-slate-500 leading-relaxed">
+              {digestRange === "all"
+                ? "The archive is empty. Run a daily build from the backend."
+                : `No arXiv papers published in the last ${digestRange} days. Try a wider range.`}
+            </div>
+          </div>
         )}
         {tierGroups && (["A", "B", "C"] as TierKey[]).map((tier) => {
           const items = tierGroups[tier];
