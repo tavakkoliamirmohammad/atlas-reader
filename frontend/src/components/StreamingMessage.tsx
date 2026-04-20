@@ -8,9 +8,10 @@ type Props = {
   role: "user" | "assistant";
   content: string;
   isStreaming?: boolean;
+  model?: "opus" | "sonnet" | "haiku";
 };
 
-export function StreamingMessage({ role, content, isStreaming }: Props) {
+export function StreamingMessage({ role, content, isStreaming, model }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     ref.current?.scrollIntoView({ behavior: "smooth", block: "end" });
@@ -30,6 +31,11 @@ export function StreamingMessage({ role, content, isStreaming }: Props) {
         ].join(" ")}
         style={isUser ? { background: "var(--user-grad)" } : undefined}
       >
+        {!isUser && model && (
+          <div className="text-[10px] uppercase tracking-wider text-slate-500 mb-1">
+            via {model}
+          </div>
+        )}
         {showLoading ? (
           <span className="inline-flex items-center gap-2 text-slate-400 text-xs">
             <span

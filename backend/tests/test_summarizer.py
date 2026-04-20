@@ -54,3 +54,42 @@ async def test_summarize_404s_for_unknown_paper(atlas_data_dir):
     with pytest.raises(KeyError):
         async for _ in summarizer.summarize("missing"):
             pass
+
+
+@pytest.mark.asyncio
+async def test_summarize_passes_model_arg(atlas_data_dir):
+    db.init()
+    papers.upsert([SAMPLE])
+    captured = {}
+
+    async def _capture(args, stdin_text=None):
+        captured["args"] = list(args)
+        yield ""
+
+    with patch("app.summarizer.pdf_cache.ensure_cached", new=AsyncMock(return_value="/tmp/9.pdf")):
+        with patch("app.summarizer.claude_subprocess.run_streaming", _capture):
+            async for _ in summarizer.summarize("9", model="haiku"):
+                pass
+
+    assert "haiku" in captured["args"]
+    # cheaper models should not pass --effort
+    assert "--effort" not in captured["args"]
+
+
+@pytest.mark.asyncio
+async def test_summarize_sonnet_drops_effort_flag(atlas_data_dir):
+    db.init()
+    papers.upsert([SAMPLE])
+    captured = {}
+
+    async def _capture(args, stdin_text=None):
+        captured["args"] = list(args)
+        yield ""
+
+    with patch("app.summarizer.pdf_cache.ensure_cached", new=AsyncMock(return_value="/tmp/9.pdf")):
+        with patch("app.summarizer.claude_subprocess.run_streaming", _capture):
+            async for _ in summarizer.summarize("9", model="sonnet"):
+                pass
+
+    assert "sonnet" in captured["args"]
+    assert "--effort" not in captured["args"]

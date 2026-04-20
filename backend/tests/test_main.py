@@ -202,7 +202,7 @@ async def test_summarize_streams_sse_events(atlas_data_dir):
     db.init()
     papers.upsert([Paper("55", "T", "A", "x", "cs.PL", "2026-04-19T08:00:00Z")])
 
-    async def _fake(arxiv_id):
+    async def _fake(arxiv_id, model="opus"):
         yield "## 1. "
         yield "Background\n"
 
@@ -231,10 +231,11 @@ async def test_ask_streams_and_accepts_history(atlas_data_dir):
     papers.upsert([Paper("66", "T", "A", "x", "cs.PL", "2026-04-19T08:00:00Z")])
     captured = {}
 
-    async def _fake(arxiv_id, question, history):
+    async def _fake(arxiv_id, question, history, model="sonnet"):
         captured["arxiv_id"] = arxiv_id
         captured["question"] = question
         captured["history"] = history
+        captured["model"] = model
         yield "answer "
         yield "chunk"
 
@@ -251,6 +252,65 @@ async def test_ask_streams_and_accepts_history(atlas_data_dir):
     assert "data: chunk" in body
     assert captured["question"] == "Why?"
     assert captured["history"][0]["content"] == "earlier"
+    assert captured["model"] == "sonnet"
+
+
+@pytest.mark.asyncio
+async def test_summarize_query_model_overrides_default(atlas_data_dir):
+    db.init()
+    papers.upsert([Paper("88", "T", "A", "x", "cs.PL", "2026-04-19T08:00:00Z")])
+    captured = {}
+
+    async def _fake(arxiv_id, model="opus"):
+        captured["model"] = model
+        yield "ok"
+
+    with patch("app.main.summarizer.summarize", _fake):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            await c.post("/api/summarize/88?model=haiku")
+
+    assert captured["model"] == "haiku"
+
+
+@pytest.mark.asyncio
+async def test_ask_query_model_overrides_body(atlas_data_dir):
+    db.init()
+    papers.upsert([Paper("89", "T", "A", "x", "cs.PL", "2026-04-19T08:00:00Z")])
+    captured = {}
+
+    async def _fake(arxiv_id, question, history, model="sonnet"):
+        captured["model"] = model
+        yield "ok"
+
+    with patch("app.main.asker.ask", _fake):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            await c.post(
+                "/api/ask/89?model=opus",
+                json={"question": "Q", "history": [], "model": "haiku"},
+            )
+
+    # Query param wins over body
+    assert captured["model"] == "opus"
+
+
+@pytest.mark.asyncio
+async def test_ask_body_model_used_when_no_query(atlas_data_dir):
+    db.init()
+    papers.upsert([Paper("90", "T", "A", "x", "cs.PL", "2026-04-19T08:00:00Z")])
+    captured = {}
+
+    async def _fake(arxiv_id, question, history, model="sonnet"):
+        captured["model"] = model
+        yield "ok"
+
+    with patch("app.main.asker.ask", _fake):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            await c.post(
+                "/api/ask/90",
+                json={"question": "Q", "history": [], "model": "haiku"},
+            )
+
+    assert captured["model"] == "haiku"
 
 
 @pytest.mark.asyncio
@@ -268,6 +328,83 @@ async def test_conversations_endpoint_returns_history(atlas_data_dir):
     assert [(m["role"], m["content"]) for m in msgs] == [
         ("user", "Q"), ("assistant", "A"),
     ]
+
+
+@pytest.mark.asyncio
+async def test_conversations_endpoint_filters_by_thread(atlas_data_dir):
+    db.init()
+    papers.upsert([Paper("78", "T", "A", "x", "cs.PL", "2026-04-19T08:00:00Z")])
+    conv_mod.append("78", "user", "in default")
+    conv_mod.append("78", "user", "in thread 2", thread_id=2)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        r1 = await c.get("/api/conversations/78")
+        r2 = await c.get("/api/conversations/78?thread_id=2")
+
+    assert [m["content"] for m in r1.json()["messages"]] == ["in default"]
+    assert [m["content"] for m in r2.json()["messages"]] == ["in thread 2"]
+
+
+@pytest.mark.asyncio
+async def test_threads_list_includes_default(atlas_data_dir):
+    db.init()
+    papers.upsert([Paper("80", "T", "A", "x", "cs.PL", "2026-04-19T08:00:00Z")])
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        r = await c.get("/api/threads/80")
+
+    assert r.status_code == 200
+    threads = r.json()["threads"]
+    assert any(t["id"] == 1 for t in threads)
+
+
+@pytest.mark.asyncio
+async def test_create_thread_endpoint_returns_id_and_lists(atlas_data_dir):
+    db.init()
+    papers.upsert([Paper("81", "T", "A", "x", "cs.PL", "2026-04-19T08:00:00Z")])
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        cr = await c.post("/api/threads/81", json={"title": "Followups"})
+        assert cr.status_code == 200
+        new_id = cr.json()["id"]
+
+        lr = await c.get("/api/threads/81")
+
+    titles = [t["title"] for t in lr.json()["threads"]]
+    ids = [t["id"] for t in lr.json()["threads"]]
+    assert "Followups" in titles
+    assert new_id in ids
+
+
+@pytest.mark.asyncio
+async def test_create_thread_endpoint_404_for_unknown_paper(atlas_data_dir):
+    db.init()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        r = await c.post("/api/threads/missing", json={"title": "x"})
+    assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_ask_writes_to_specified_thread(atlas_data_dir):
+    db.init()
+    papers.upsert([Paper("82", "T", "A", "x", "cs.PL", "2026-04-19T08:00:00Z")])
+
+    async def _fake(arxiv_id, question, history, model="sonnet", thread_id=1):
+        # Persist directly using the plumbed thread_id, mirroring real asker.
+        conv_mod.append(arxiv_id, "user", question, thread_id=thread_id)
+        yield "ok"
+        conv_mod.append(arxiv_id, "assistant", "ok", thread_id=thread_id)
+
+    with patch("app.main.asker.ask", _fake):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            r = await c.post(
+                "/api/ask/82?thread_id=7",
+                json={"question": "Q", "history": []},
+            )
+
+    assert r.status_code == 200
+    assert [m["content"] for m in conv_mod.history("82", thread_id=7)] == ["Q", "ok"]
+    assert conv_mod.history("82", thread_id=1) == []
 
 
 @pytest.mark.asyncio

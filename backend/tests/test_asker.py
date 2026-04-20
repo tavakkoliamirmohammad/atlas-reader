@@ -59,6 +59,24 @@ async def test_ask_passes_sonnet_model_and_history_in_prompt(atlas_data_dir):
 
 
 @pytest.mark.asyncio
+async def test_ask_passes_model_arg(atlas_data_dir):
+    db.init()
+    papers.upsert([SAMPLE])
+    captured = {}
+
+    async def _capture(args, stdin_text=None):
+        captured["args"] = list(args)
+        yield ""
+
+    with patch("app.asker.pdf_cache.ensure_cached", new=AsyncMock(return_value="/tmp/7.pdf")):
+        with patch("app.asker.claude_subprocess.run_streaming", _capture):
+            async for _ in asker.ask("7", "Q", history=[], model="haiku"):
+                pass
+
+    assert "haiku" in captured["args"]
+
+
+@pytest.mark.asyncio
 async def test_ask_does_not_persist_assistant_on_subprocess_failure(atlas_data_dir):
     db.init()
     papers.upsert([SAMPLE])

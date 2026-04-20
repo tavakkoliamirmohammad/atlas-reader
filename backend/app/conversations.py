@@ -65,8 +65,22 @@ def list_threads(arxiv_id: str) -> List[sqlite3.Row]:
 
 
 def create_thread(arxiv_id: str, title: str = "Conversation") -> int:
-    """Create a new thread for a paper and return its id."""
+    """Create a new thread for a paper and return its id.
+
+    The id 1 is reserved for the synthetic default thread so that
+    pre-existing conversation rows (which all carry thread_id=1) line up
+    with a real tab. We therefore guarantee that real thread rows always
+    have id >= 2 by seeding sqlite_sequence on first insert.
+    """
     with db.connect() as conn:
+        # Ensure AUTOINCREMENT skips id=1 (reserved for the default thread).
+        # sqlite_sequence rows only exist after the first insert; seed it now.
+        conn.execute(
+            "INSERT OR IGNORE INTO sqlite_sequence (name, seq) VALUES ('threads', 1)"
+        )
+        conn.execute(
+            "UPDATE sqlite_sequence SET seq = MAX(seq, 1) WHERE name = 'threads'"
+        )
         cur = conn.execute(
             "INSERT INTO threads (arxiv_id, title) VALUES (?, ?)",
             (arxiv_id, title),

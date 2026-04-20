@@ -1,11 +1,15 @@
-"""Stream a chat answer using `claude -p --model sonnet`. Persists messages."""
+"""Stream a chat answer using `claude -p`. Ephemeral — does NOT persist messages.
+
+Per user privacy preference: conversations live only in the frontend's React
+state. They evaporate when the user switches papers or refreshes the page.
+"""
 
 from __future__ import annotations
 
 from pathlib import Path
 from typing import AsyncIterator, List, TypedDict
 
-from app import claude_subprocess, conversations, papers, pdf_cache
+from app import claude_subprocess, papers, pdf_cache
 
 
 SYSTEM_PATH = Path(__file__).parent / "prompts" / "chat_system.txt"
@@ -31,9 +35,8 @@ async def ask(
     question: str,
     history: List[ChatMessage],
     model: str = "sonnet",
-    thread_id: int = conversations.DEFAULT_THREAD_ID,
 ) -> AsyncIterator[str]:
-    """Yield chunks of the answer; persist user msg up-front, assistant on success."""
+    """Yield answer chunks as they stream. No DB writes."""
     if papers.get(arxiv_id) is None:
         raise KeyError(arxiv_id)
 
@@ -47,14 +50,8 @@ async def ask(
         f"\n\nUSER QUESTION: {question}\n"
     )
 
-    conversations.append(arxiv_id, "user", question, thread_id=thread_id)
-
-    collected: list[str] = []
     async for chunk in claude_subprocess.run_streaming(
         ["--model", model, "--allowedTools", "Read", "-p", "Answer the question."],
         stdin_text=prompt,
     ):
-        collected.append(chunk)
         yield chunk
-
-    conversations.append(arxiv_id, "assistant", "".join(collected), thread_id=thread_id)

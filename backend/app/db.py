@@ -58,6 +58,27 @@ CREATE TABLE IF NOT EXISTS events (
     event       TEXT NOT NULL,
     arxiv_id    TEXT
 );
+
+CREATE TABLE IF NOT EXISTS highlights (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    arxiv_id    TEXT NOT NULL REFERENCES papers(arxiv_id),
+    quote       TEXT NOT NULL,
+    color       TEXT NOT NULL DEFAULT 'yellow',
+    page        INTEGER,
+    note        TEXT,
+    created_at  TEXT DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_highlights_arxiv ON highlights(arxiv_id);
+
+CREATE TABLE IF NOT EXISTS glossary (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    arxiv_id    TEXT NOT NULL REFERENCES papers(arxiv_id),
+    term        TEXT NOT NULL,
+    definition  TEXT,
+    created_at  TEXT DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(arxiv_id, term)
+);
+CREATE INDEX IF NOT EXISTS idx_glossary_arxiv ON glossary(arxiv_id);
 CREATE INDEX IF NOT EXISTS idx_events_ts ON events(ts);
 CREATE INDEX IF NOT EXISTS idx_papers_published ON papers(published);
 CREATE INDEX IF NOT EXISTS idx_conv_arxiv      ON conversations(arxiv_id);

@@ -2,12 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import { useMatch } from "react-router-dom";
 import {
   type ChatMessage,
-  fetchConversations,
   streamAsk,
   streamSummary,
 } from "@/lib/api";
 import { StreamingMessage } from "./StreamingMessage";
 import { QuickActionChips } from "./QuickActionChips";
+import { useUiStore, type ModelChoice } from "@/stores/ui-store";
 
 export function ChatPanel() {
   // useMatch climbs the URL directly, so this works even though ChatPanel
@@ -18,10 +18,13 @@ export function ChatPanel() {
   const [streaming, setStreaming] = useState(false);
   const [draft, setDraft] = useState("");
   const abortRef = useRef<AbortController | null>(null);
+  const model = useUiStore((s) => s.model);
+  const setModel = useUiStore((s) => s.setModel);
 
+  // Ephemeral conversations: clear on paper switch, never load from disk.
+  // Per user privacy preference, no chat history is persisted anywhere.
   useEffect(() => {
-    if (!arxivId) return;
-    fetchConversations(arxivId).then(setMessages).catch(() => setMessages([]));
+    setMessages([]);
     return () => { abortRef.current?.abort(); };
   }, [arxivId]);
 
@@ -51,7 +54,11 @@ export function ChatPanel() {
     const question = draft.trim();
     const historyForBackend = messages;
     setDraft("");
-    setMessages((m) => [...m, { role: "user", content: question }, { role: "assistant", content: "" }]);
+    setMessages((m) => [
+      ...m,
+      { role: "user", content: question },
+      { role: "assistant", content: "", model },
+    ]);
     setStreaming(true);
     abortRef.current = new AbortController();
     try {
@@ -59,7 +66,7 @@ export function ChatPanel() {
         onChunk: appendChunk,
         onDone: () => setStreaming(false),
         onError: (e) => { appendChunk(`\n\n[error: ${e}]`); setStreaming(false); },
-      }, abortRef.current.signal);
+      }, abortRef.current.signal, model);
     } catch (e) {
       setStreaming(false);
     }
@@ -67,7 +74,7 @@ export function ChatPanel() {
 
   async function summarize() {
     if (!arxivId || streaming) return;
-    setMessages((m) => [...m, { role: "assistant", content: "" }]);
+    setMessages((m) => [...m, { role: "assistant", content: "", model }]);
     setStreaming(true);
     abortRef.current = new AbortController();
     try {
@@ -75,7 +82,7 @@ export function ChatPanel() {
         onChunk: appendChunk,
         onDone: () => setStreaming(false),
         onError: (e) => { appendChunk(`\n\n[error: ${e}]`); setStreaming(false); },
-      }, abortRef.current.signal);
+      }, abortRef.current.signal, model);
     } catch (e) {
       setStreaming(false);
     }
@@ -114,6 +121,7 @@ export function ChatPanel() {
             key={i}
             role={m.role as "user" | "assistant"}
             content={m.content}
+            model={m.model}
             isStreaming={streaming && i === messages.length - 1 && m.role === "assistant"}
           />
         ))}
@@ -131,6 +139,18 @@ export function ChatPanel() {
             rows={2}
             className="flex-1 bg-transparent border-0 outline-none text-[13px] text-slate-200 placeholder:text-slate-500 resize-none disabled:opacity-50"
           />
+          <select
+            value={model}
+            onChange={(e) => setModel(e.target.value as ModelChoice)}
+            disabled={streaming}
+            title="Model for the next call"
+            aria-label="Model for the next call"
+            className="bg-white/[0.04] border border-white/10 rounded-md px-1.5 py-1 text-[11px] text-slate-200 outline-none cursor-pointer hover:border-white/20 focus:border-[color:var(--ac1-mid)] disabled:opacity-50"
+          >
+            <option value="opus">opus</option>
+            <option value="sonnet">sonnet</option>
+            <option value="haiku">haiku</option>
+          </select>
           <button
             onClick={send}
             disabled={streaming || !draft.trim()}

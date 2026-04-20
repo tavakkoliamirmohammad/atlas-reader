@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import httpx
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Response
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -21,6 +21,7 @@ from app import (
     db,
     digest,
     health,
+    highlights,
     papers,
     pdf_cache,
     stats,
@@ -149,7 +150,12 @@ async def post_summarize(arxiv_id: str, model: str | None = None):
 
 
 @app.post("/api/ask/{arxiv_id}")
-async def post_ask(arxiv_id: str, body: AskBody, model: str | None = None):
+async def post_ask(
+    arxiv_id: str,
+    body: AskBody,
+    model: str | None = None,
+    thread_id: int = 1,
+):
     if papers.get(arxiv_id) is None:
         raise HTTPException(status_code=404, detail="paper not found")
 
@@ -158,7 +164,13 @@ async def post_ask(arxiv_id: str, body: AskBody, model: str | None = None):
 
     async def gen():
         try:
-            async for chunk in asker.ask(arxiv_id, body.question, body.history, model=chosen):
+            async for chunk in asker.ask(
+                arxiv_id,
+                body.question,
+                body.history,
+                model=chosen,
+                thread_id=thread_id,
+            ):
                 yield _sse_format(chunk)
             yield b"event: done\ndata: ok\n\n"
         except Exception as exc:
@@ -168,9 +180,31 @@ async def post_ask(arxiv_id: str, body: AskBody, model: str | None = None):
 
 
 @app.get("/api/conversations/{arxiv_id}")
-async def get_conversations(arxiv_id: str) -> dict:
-    rows = conversations.history(arxiv_id)
+async def get_conversations(arxiv_id: str, thread_id: int = 1) -> dict:
+    rows = conversations.history(arxiv_id, thread_id=thread_id)
     return {"messages": [_row_to_dict(r) for r in rows]}
+
+
+@app.get("/api/threads/{arxiv_id}")
+async def get_threads(arxiv_id: str) -> dict:
+    rows = conversations.list_threads(arxiv_id)
+    return {
+        "threads": [
+            _row_to_dict(r) if hasattr(r, "keys") else dict(r) for r in rows
+        ]
+    }
+
+
+class CreateThreadBody(BaseModel):
+    title: str = "Conversation"
+
+
+@app.post("/api/threads/{arxiv_id}")
+async def post_thread(arxiv_id: str, body: CreateThreadBody) -> dict:
+    if papers.get(arxiv_id) is None:
+        raise HTTPException(status_code=404, detail="paper not found")
+    thread_id = conversations.create_thread(arxiv_id, body.title)
+    return {"id": thread_id, "arxiv_id": arxiv_id, "title": body.title}
 
 
 def _build_row(date_str: str):
@@ -205,6 +239,43 @@ async def get_build_progress(date: str):
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache"},
     )
+
+
+class HighlightBody(BaseModel):
+    quote: str
+    color: str = "yellow"
+    page: int | None = None
+    note: str | None = None
+
+
+@app.get("/api/highlights/{arxiv_id}")
+async def get_highlights(arxiv_id: str) -> dict:
+    rows = highlights.list_for(arxiv_id)
+    return {"highlights": [_row_to_dict(r) for r in rows]}
+
+
+@app.post("/api/highlights/{arxiv_id}")
+async def post_highlight(arxiv_id: str, body: HighlightBody) -> dict:
+    if papers.get(arxiv_id) is None:
+        raise HTTPException(status_code=404, detail="paper not found")
+    quote = body.quote.strip()
+    if not quote:
+        raise HTTPException(status_code=400, detail="quote must be non-empty")
+    new_id = highlights.add(
+        arxiv_id,
+        quote,
+        color=body.color or "yellow",
+        page=body.page,
+        note=body.note,
+    )
+    return {"id": new_id}
+
+
+@app.delete("/api/highlights/{highlight_id}", status_code=204)
+async def delete_highlight(highlight_id: int) -> Response:
+    if not highlights.delete(highlight_id):
+        raise HTTPException(status_code=404, detail="highlight not found")
+    return Response(status_code=204)
 
 
 def _frontend_dist() -> Path | None:
