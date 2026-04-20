@@ -4,6 +4,7 @@ import * as pdfjsLib from "pdfjs-dist";
 import type {
   PDFDocumentProxy,
   PDFPageProxy,
+  PageViewport,
   RenderTask,
 } from "pdfjs-dist";
 import type { ReadingMode } from "@/stores/ui-store";
@@ -33,6 +34,26 @@ const GAP = 12; // vertical gap between pages, px
 const VIEWPORTS_AHEAD = 2; // render this many viewports of pages above + below visible area
 const RENDER_LRU_LIMIT = 12;
 
+export type SelectionRect = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
+export type SelectionPayload = {
+  text: string;
+  page: number; // 1-based
+  rects: SelectionRect[]; // in normalized PDF coords (0..1 of page width/height)
+};
+
+export type HighlightWithPosition = {
+  id: number | string;
+  page: number; // 1-based
+  color: string; // any valid CSS color (rgba preferred for translucency)
+  rects: SelectionRect[]; // in normalized PDF coords
+};
+
 type Props = {
   fileUrl: string;
   mode: ReadingMode;
@@ -46,6 +67,15 @@ type Props = {
   onSections?: (sections: RailSection[]) => void;
   /** Imperative jump-to-page handle. */
   jumpRef?: React.MutableRefObject<((pageNumber: number) => void) | null>;
+  /**
+   * Fires on selection change inside the viewport. `null` means selection was
+   * cleared (e.g. user clicked elsewhere).
+   */
+  onSelection?: (payload: SelectionPayload | null) => void;
+  /** Optional in-PDF highlight overlays. */
+  highlights?: HighlightWithPosition[];
+  /** Click on a highlight rectangle. */
+  onHighlightClick?: (id: number | string) => void;
   /** Imperative handle so the parent can attach mouseenter on the scroll container. */
   scrollContainerRef?: React.MutableRefObject<HTMLDivElement | null>;
 };
@@ -64,6 +94,8 @@ export function PdfViewport({
   onProgress,
   onSections,
   jumpRef,
+  onSelection,
+  highlights,
   scrollContainerRef,
 }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -308,6 +340,9 @@ export function PdfViewport({
         await task.promise;
         renderTasksRef.current.delete(pageNumber);
 
+        // Render the text layer (Phase 2).
+        await renderTextLayerFor(page, viewport, wrap);
+
         // Mark rendered + bump LRU.
         renderedSetRef.current.add(pageNumber);
         const order = renderedOrderRef.current.filter((n) => n !== pageNumber);
@@ -321,9 +356,9 @@ export function PdfViewport({
           renderedSetRef.current.delete(evict);
           const evictWrap = pageRefs.current.get(evict);
           if (evictWrap) {
-            // Drop the canvas to free GPU/VRAM; placeholder slot remains so
-            // the scroll height is stable.
+            // Drop canvas + text layer to free memory; placeholder remains.
             evictWrap.querySelector("canvas.pdf-canvas")?.remove();
+            evictWrap.querySelector(".pdf-text-layer")?.remove();
           }
         }
       } catch (err: unknown) {
@@ -374,9 +409,9 @@ export function PdfViewport({
     };
   }, [pages, updateVisibleRange]);
 
-  // Re-render rendered pages when the reading mode changes — the canvas bg
-  // hint differs per mode; the CSS filter alone handles the bulk of it but
-  // a re-paint with the matching background color avoids halos at edges.
+  // Re-render rendered pages when the reading mode changes (the canvas bg
+  // hint differs per mode; the CSS filter alone handles the rest, but for
+  // sharpness we re-paint with the matching background color).
   useEffect(() => {
     if (pages.length === 0) return;
     const toRerender = Array.from(renderedSetRef.current);
@@ -389,6 +424,77 @@ export function PdfViewport({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode]);
 
+  // Selection wiring (Phase 2). Listen to document selectionchange and decide
+  // whether the selection lives inside our viewport. Debounce slightly so we
+  // don't flood the parent during drag-select.
+  useEffect(() => {
+    if (!onSelection) return;
+    const node = containerRef.current;
+    if (!node) return;
+    let timer: number | null = null;
+
+    const compute = () => {
+      const sel = window.getSelection();
+      if (!sel || sel.rangeCount === 0 || sel.isCollapsed) {
+        onSelection(null);
+        return;
+      }
+      const range = sel.getRangeAt(0);
+      // Confirm selection is inside our scroll container.
+      if (!node.contains(range.commonAncestorContainer)) {
+        return; // Not ours — ignore (don't even fire null, the selection is elsewhere).
+      }
+      // Find the page wrap that contains the selection start.
+      const startEl =
+        range.startContainer.nodeType === Node.ELEMENT_NODE
+          ? (range.startContainer as Element)
+          : range.startContainer.parentElement;
+      const pageWrap = startEl?.closest(".pdf-page") as HTMLElement | null;
+      const pageNum = pageWrap ? Number(pageWrap.dataset.page || "0") : 0;
+      if (!pageWrap || !pageNum) {
+        onSelection(null);
+        return;
+      }
+
+      const pageRect = pageWrap.getBoundingClientRect();
+      const w = pageRect.width || 1;
+      const h = pageRect.height || 1;
+      // Convert client rects to normalized page-relative coords.
+      const rects: SelectionRect[] = [];
+      const clientRects = range.getClientRects();
+      for (let i = 0; i < clientRects.length; i++) {
+        const r = clientRects[i];
+        if (r.width === 0 || r.height === 0) continue;
+        rects.push({
+          x: (r.left - pageRect.left) / w,
+          y: (r.top - pageRect.top) / h,
+          width: r.width / w,
+          height: r.height / h,
+        });
+      }
+      if (rects.length === 0) {
+        onSelection(null);
+        return;
+      }
+      onSelection({
+        text: sel.toString(),
+        page: pageNum,
+        rects,
+      });
+    };
+
+    const handler = () => {
+      if (timer) window.clearTimeout(timer);
+      timer = window.setTimeout(compute, 100);
+    };
+
+    document.addEventListener("selectionchange", handler);
+    return () => {
+      document.removeEventListener("selectionchange", handler);
+      if (timer) window.clearTimeout(timer);
+    };
+  }, [onSelection]);
+
   // Cleanup on unmount. Capture the ref values up-front so the cleanup
   // function operates on the same instances that exist now.
   useEffect(() => {
@@ -400,6 +506,18 @@ export function PdfViewport({
       pdfDocRef.current = null;
     };
   }, []);
+
+  // Group highlights by page for quick lookup.
+  const highlightsByPage = useMemo(() => {
+    const m = new Map<number, HighlightWithPosition[]>();
+    if (!highlights) return m;
+    for (const h of highlights) {
+      const arr = m.get(h.page) ?? [];
+      arr.push(h);
+      m.set(h.page, arr);
+    }
+    return m;
+  }, [highlights]);
 
   const totalHeight = useMemo(() => {
     if (pages.length === 0) return 0;
@@ -419,7 +537,7 @@ export function PdfViewport({
       }}
     >
       {/* Inner positioning surface: total document height so virtualized pages
-          can be absolutely positioned and the scrollbar reflects the full doc. */}
+          can be absolutely positioned and scrollbar reflects the full doc. */}
       <div
         ref={innerRef}
         className="relative mx-auto"
@@ -451,7 +569,43 @@ export function PdfViewport({
               borderRadius: 4,
               overflow: "hidden",
             }}
-          />
+          >
+            {/* Highlight overlay (Phase 2). Sized in normalized PDF coords. */}
+            {highlightsByPage.get(p.pageNumber)?.map((hl) => (
+              <div
+                key={`hl-${hl.id}`}
+                className="absolute pointer-events-none"
+                style={{ inset: 0 }}
+              >
+                {hl.rects.map((r, i) => (
+                  <div
+                    key={`hl-${hl.id}-${i}`}
+                    role="button"
+                    aria-label="highlight"
+                    onClick={() => {
+                      if (typeof window !== "undefined") {
+                        // Re-enable pointer events for the rect itself so
+                        // clicks land here, but keep selection working through
+                        // the rest of the overlay.
+                      }
+                    }}
+                    className="absolute"
+                    style={{
+                      left: `${r.x * 100}%`,
+                      top: `${r.y * 100}%`,
+                      width: `${r.width * 100}%`,
+                      height: `${r.height * 100}%`,
+                      background: hl.color,
+                      mixBlendMode: mode === "dark" ? "screen" : "multiply",
+                      pointerEvents: "auto",
+                      cursor: "pointer",
+                      borderRadius: 2,
+                    }}
+                  />
+                ))}
+              </div>
+            ))}
+          </div>
         ))}
 
         {/* Loading overlay — only shown until first layout completes. */}
@@ -496,6 +650,46 @@ export function PdfViewport({
 
 // ---------------------------------------------------------------------------
 // Helpers
+
+async function renderTextLayerFor(
+  page: PDFPageProxy,
+  viewport: PageViewport,
+  wrap: HTMLElement,
+) {
+  // Drop any previous text layer for this page.
+  wrap.querySelector(".pdf-text-layer")?.remove();
+  const textContent = await page.getTextContent();
+  const textDiv = document.createElement("div");
+  textDiv.className = "pdf-text-layer";
+  // Style mirrors pdfjs's standard text-layer CSS: transparent absolutely-
+  // positioned spans overlaid on the canvas. We keep the spans interactive so
+  // native text selection works.
+  textDiv.style.position = "absolute";
+  textDiv.style.inset = "0";
+  textDiv.style.overflow = "hidden";
+  textDiv.style.opacity = "1";
+  textDiv.style.lineHeight = "1.0";
+  textDiv.style.userSelect = "text";
+  textDiv.style.color = "transparent";
+  // pdfjs's TextLayer sizes spans via `calc(... * var(--total-scale-factor))`
+  // which expands to `--scale-factor * --user-unit`. Set both so spans align
+  // with the canvas regardless of the host stylesheet.
+  textDiv.style.setProperty("--scale-factor", String(viewport.scale));
+  textDiv.style.setProperty("--total-scale-factor", String(viewport.scale));
+  textDiv.style.setProperty("--user-unit", "1");
+  wrap.appendChild(textDiv);
+
+  const layer = new pdfjsLib.TextLayer({
+    textContentSource: textContent,
+    container: textDiv,
+    viewport,
+  });
+  try {
+    await layer.render();
+  } catch {
+    /* noop — text layer rendering can fail on protected docs */
+  }
+}
 
 type OutlineNode = {
   title: string;

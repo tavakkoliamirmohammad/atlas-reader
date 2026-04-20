@@ -214,3 +214,35 @@ html[data-motion="off"] .shimmer {
   animation: none !important;
   transition: none !important;
 }
+
+/* ---------- pdf.js text layer ----------
+   Minimal styles so the transparent <span> elements emitted by pdfjs's
+   TextLayer overlay the rendered canvas pixel-perfectly and stay selectable.
+   We keep them invisible (color: transparent) — only the browser's selection
+   paint shows through, tinted to match the accent color. */
+.pdf-text-layer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  line-height: 1.0;
+  text-align: initial;
+  pointer-events: auto;
+  cursor: text;
+}
+.pdf-text-layer :is(span, br) {
+  color: transparent;
+  position: absolute;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0% 0%;
+}
+.pdf-text-layer span::selection {
+  background: rgba(34, 211, 238, 0.35);
+  color: transparent;
+}
+.pdf-text-layer span::-moz-selection {
+  background: rgba(34, 211, 238, 0.35);
+  color: transparent;
+}
+.pdf-text-layer br::selection { background: transparent; }
+.pdf-text-layer br::-moz-selection { background: transparent; }
