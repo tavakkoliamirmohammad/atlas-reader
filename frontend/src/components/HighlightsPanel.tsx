@@ -58,6 +58,7 @@ export function HighlightsPanel() {
   const bannerTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
+    if (ctx) return;          // context owns loading; no double-fetch
     if (!arxivId) {
       setItems([]);
       return;
@@ -67,7 +68,7 @@ export function HighlightsPanel() {
       .then((rows) => { if (alive) setItems(rows); })
       .catch(() => { if (alive) setItems([]); });
     return () => { alive = false; };
-  }, [arxivId]);
+  }, [arxivId, ctx]);
 
   useEffect(() => {
     if (!adding) {

@@ -3,6 +3,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -99,31 +100,23 @@ export function PaperReader({ arxivId }: Props) {
   );
 
   const onDelete = useCallback(async (id: number) => {
-    setItems((cur) => {
-      const prev = cur;
-      // optimistic remove; restore on failure via catch below
-      (async () => {
-        try {
-          await deleteHighlight(id);
-        } catch {
-          setItems(prev);
-        }
-      })();
-      return cur.filter((h) => h.id !== id);
-    });
-  }, []);
+    const prev = items;
+    setItems((cur) => cur.filter((h) => h.id !== id));
+    try {
+      await deleteHighlight(id);
+    } catch {
+      setItems(prev);
+    }
+  }, [items]);
 
   const onJump = useCallback((page: number) => {
     jumpRef.current?.(page);
   }, []);
 
-  const contextValue: HighlightsContextValue = {
-    arxivId,
-    items,
-    onAdd,
-    onDelete,
-    onJump,
-  };
+  const contextValue: HighlightsContextValue = useMemo(
+    () => ({ arxivId, items, onAdd, onDelete, onJump }),
+    [arxivId, items, onAdd, onDelete, onJump],
+  );
 
   return (
     <HighlightsProvider value={contextValue}>
