@@ -7,6 +7,7 @@ import {
 } from "@/lib/api";
 import { StreamingMessage } from "./StreamingMessage";
 import { QuickActionChips } from "./QuickActionChips";
+import { Glossary } from "./Glossary";
 import { useUiStore, type ModelChoice } from "@/stores/ui-store";
 
 const MODEL_META: Record<ModelChoice, { label: string; tag: string }> = {
@@ -181,6 +182,7 @@ export function ChatPanel() {
         </div>
         <div className="font-semibold text-[15px] text-slate-100">Ask about this paper</div>
       </div>
+      <Glossary arxivId={arxivId} />
       <div className="px-3 py-2.5 border-b border-white/5">
         <div className="text-[10px] uppercase tracking-wider text-slate-500 mb-1.5">Quick actions</div>
         <QuickActionChips onSummarize={summarize} onQuickAsk={quickAsk} disabled={streaming} />

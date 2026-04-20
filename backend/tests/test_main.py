@@ -231,7 +231,7 @@ async def test_ask_streams_and_accepts_history(atlas_data_dir):
     papers.upsert([Paper("66", "T", "A", "x", "cs.PL", "2026-04-19T08:00:00Z")])
     captured = {}
 
-    async def _fake(arxiv_id, question, history, model="sonnet"):
+    async def _fake(arxiv_id, question, history, model="sonnet", **_kw):
         captured["arxiv_id"] = arxiv_id
         captured["question"] = question
         captured["history"] = history
@@ -261,7 +261,7 @@ async def test_summarize_query_model_overrides_default(atlas_data_dir):
     papers.upsert([Paper("88", "T", "A", "x", "cs.PL", "2026-04-19T08:00:00Z")])
     captured = {}
 
-    async def _fake(arxiv_id, model="opus"):
+    async def _fake(arxiv_id, model="opus", **_kw):
         captured["model"] = model
         yield "ok"
 
@@ -278,7 +278,7 @@ async def test_ask_query_model_overrides_body(atlas_data_dir):
     papers.upsert([Paper("89", "T", "A", "x", "cs.PL", "2026-04-19T08:00:00Z")])
     captured = {}
 
-    async def _fake(arxiv_id, question, history, model="sonnet"):
+    async def _fake(arxiv_id, question, history, model="sonnet", **_kw):
         captured["model"] = model
         yield "ok"
 
@@ -299,7 +299,7 @@ async def test_ask_body_model_used_when_no_query(atlas_data_dir):
     papers.upsert([Paper("90", "T", "A", "x", "cs.PL", "2026-04-19T08:00:00Z")])
     captured = {}
 
-    async def _fake(arxiv_id, question, history, model="sonnet"):
+    async def _fake(arxiv_id, question, history, model="sonnet", **_kw):
         captured["model"] = model
         yield "ok"
 
@@ -385,15 +385,13 @@ async def test_create_thread_endpoint_404_for_unknown_paper(atlas_data_dir):
 
 
 @pytest.mark.asyncio
-async def test_ask_writes_to_specified_thread(atlas_data_dir):
+async def test_ask_accepts_thread_id_query_param(atlas_data_dir):
+    """/api/ask is ephemeral, but the thread_id query param must still be accepted."""
     db.init()
     papers.upsert([Paper("82", "T", "A", "x", "cs.PL", "2026-04-19T08:00:00Z")])
 
-    async def _fake(arxiv_id, question, history, model="sonnet", thread_id=1):
-        # Persist directly using the plumbed thread_id, mirroring real asker.
-        conv_mod.append(arxiv_id, "user", question, thread_id=thread_id)
+    async def _fake(arxiv_id, question, history, model="sonnet", **_kw):
         yield "ok"
-        conv_mod.append(arxiv_id, "assistant", "ok", thread_id=thread_id)
 
     with patch("app.main.asker.ask", _fake):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
@@ -403,8 +401,7 @@ async def test_ask_writes_to_specified_thread(atlas_data_dir):
             )
 
     assert r.status_code == 200
-    assert [m["content"] for m in conv_mod.history("82", thread_id=7)] == ["Q", "ok"]
-    assert conv_mod.history("82", thread_id=1) == []
+    assert "data: ok" in r.text
 
 
 @pytest.mark.asyncio
@@ -433,4 +430,71 @@ async def test_build_progress_returns_404_when_no_build_for_date(atlas_data_dir)
     db.init()
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
         r = await c.get("/api/build-progress?date=2099-01-01")
+    assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_glossary_get_returns_empty_initially(atlas_data_dir):
+    db.init()
+    papers.upsert([Paper("g100", "T", "A", "x", "cs.PL", "2026-04-19T08:00:00Z")])
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        r = await c.get("/api/glossary/g100")
+    assert r.status_code == 200
+    assert r.json() == {"terms": []}
+
+
+@pytest.mark.asyncio
+async def test_glossary_extract_endpoint_returns_term_list(atlas_data_dir):
+    db.init()
+    papers.upsert([Paper("g101", "T", "A", "abstract here", "cs.PL", "2026-04-19T08:00:00Z")])
+
+    async def _fake_extract(arxiv_id):
+        # Mimic glossary.extract_terms: persist + return term list.
+        from app import glossary as g
+        with db.connect() as conn:
+            conn.executemany(
+                "INSERT OR IGNORE INTO glossary (arxiv_id, term) VALUES (?, ?)",
+                [(arxiv_id, t) for t in ["MLIR", "DSL"]],
+            )
+        return ["MLIR", "DSL"]
+
+    with patch("app.main.glossary.extract_terms", _fake_extract):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            r = await c.post("/api/glossary/g101/extract")
+
+    assert r.status_code == 200
+    body = r.json()
+    assert body["extracted"] == ["MLIR", "DSL"]
+    assert [t["term"] for t in body["terms"]] == ["MLIR", "DSL"]
+
+
+@pytest.mark.asyncio
+async def test_glossary_extract_404_for_unknown_paper(atlas_data_dir):
+    db.init()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        r = await c.post("/api/glossary/missing/extract")
+    assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_glossary_definition_endpoint_returns_text(atlas_data_dir):
+    db.init()
+    papers.upsert([Paper("g102", "T", "A", "x", "cs.PL", "2026-04-19T08:00:00Z")])
+
+    async def _fake_define(arxiv_id, term):
+        return f"definition of {term}"
+
+    with patch("app.main.glossary.define", _fake_define):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            r = await c.get("/api/glossary/g102/MLIR/definition")
+
+    assert r.status_code == 200
+    assert r.json() == {"term": "MLIR", "definition": "definition of MLIR"}
+
+
+@pytest.mark.asyncio
+async def test_glossary_definition_404_for_unknown_paper(atlas_data_dir):
+    db.init()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        r = await c.get("/api/glossary/missing/MLIR/definition")
     assert r.status_code == 404
