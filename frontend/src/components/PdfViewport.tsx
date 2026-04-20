@@ -403,7 +403,17 @@ export function PdfViewport({
 
   useEffect(() => {
     if (pages.length === 0) return;
+    // Run updateVisibleRange synchronously now AND once more on the next
+    // animation frame. Why both: the synchronous call covers normal mode/
+    // resize updates; the rAF call covers the empty→non-empty paper-switch
+    // transition where ref callbacks for the new page divs haven't all
+    // populated `pageRefs` by the time effects fire (React commit timing
+    // races). Without the rAF retry, renderPage finds `wrap` null and
+    // silently no-ops, leaving canvases blank — the "click a paper and the
+    // PDF doesn't show up" bug. renderPage is idempotent (renderedSet check)
+    // so a double-call is harmless.
     updateVisibleRange();
+    const retryRaf = window.requestAnimationFrame(() => updateVisibleRange());
     const node = containerRef.current;
     if (!node) return;
     let raf = 0;
@@ -416,6 +426,7 @@ export function PdfViewport({
     };
     node.addEventListener("scroll", onScroll, { passive: true });
     return () => {
+      window.cancelAnimationFrame(retryRaf);
       node.removeEventListener("scroll", onScroll);
       if (raf) window.cancelAnimationFrame(raf);
     };
