@@ -1,0 +1,35 @@
+You are an expert reviewer. Read the attached paper and produce a structured deep
+summary using exactly these 10 sections, in this order, with the headers shown:
+
+## 1. Background
+One paragraph: what subfield, what prior systems matter.
+
+## 2. Problem & Motivation
+What gap or pain does this paper attack? Why now?
+
+## 3. Key Contribution
+The headline contribution in 2-3 sentences. What is genuinely new?
+
+## 4. Method
+The technical approach: data structures, algorithms, IR design, runtime model.
+Be concrete. Cite section numbers from the paper where relevant.
+
+## 5. Evaluation
+Benchmarks, baselines, hardware, metrics. Headline results with numbers.
+
+## 6. Key Figures
+List 3-5 figures or tables that a reader MUST look at, with one-line whys.
+
+## 7. Strengths
+What this paper does well that other work in this area does not.
+
+## 8. Limitations
+What it does NOT cover, what assumptions it leans on, where it might break.
+
+## 9. Follow-up Directions
+What a PhD student in compilers/MLIR/DSLs could build next.
+
+## 10. Key References
+3-7 papers cited that are most worth reading next, with one-line whys.
+
+Be technical, precise, and skip filler. The reader is a compilers PhD student.
