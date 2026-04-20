@@ -5,7 +5,7 @@ from __future__ import annotations
 import sqlite3
 from datetime import date, datetime, timezone
 
-from app import arxiv, db, papers
+from app import arxiv, db, health, papers, ranker
 
 
 # Mirrors ~/.claude/compiler-papers.sh
@@ -69,6 +69,12 @@ async def build_today() -> list[sqlite3.Row]:
             seen.setdefault(p.arxiv_id, p)
 
         papers.upsert(list(seen.values()))
+        if health.claude_available():
+            try:
+                await ranker.score_papers(list(seen.values()))
+            except Exception as exc:
+                import logging
+                logging.getLogger(__name__).warning("ranker failed: %s", exc)
         rows = papers.list_recent(days=3)
         _finish_build(status="done", paper_count=len(seen))
         return rows

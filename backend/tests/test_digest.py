@@ -64,3 +64,29 @@ async def test_build_today_records_failure_when_fetch_raises(atlas_data_dir):
     assert rows[0]["status"] == "failed"
     assert "RuntimeError" in rows[0]["log"]
     assert "arxiv down" in rows[0]["log"]
+
+
+@pytest.mark.asyncio
+async def test_build_today_calls_ranker_when_ai_available(atlas_data_dir):
+    db.init()
+    pl = [Paper("a", "T", "A", "x", "cs.PL", "2026-04-19T08:00:00Z")]
+
+    with patch("app.digest.arxiv.fetch_recent", new=AsyncMock(side_effect=[pl, []])):
+        with patch("app.digest.health.claude_available", return_value=True):
+            with patch("app.digest.ranker.score_papers", new=AsyncMock()) as spy:
+                await digest.build_today()
+
+    spy.assert_awaited_once()
+    args, _ = spy.call_args
+    assert args[0][0].arxiv_id == "a"
+
+
+@pytest.mark.asyncio
+async def test_build_today_skips_ranker_when_ai_unavailable(atlas_data_dir):
+    db.init()
+    with patch("app.digest.arxiv.fetch_recent", new=AsyncMock(side_effect=[[], []])):
+        with patch("app.digest.health.claude_available", return_value=False):
+            with patch("app.digest.ranker.score_papers", new=AsyncMock()) as spy:
+                await digest.build_today()
+
+    spy.assert_not_awaited()
