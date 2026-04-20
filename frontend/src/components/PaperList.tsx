@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, type Paper } from "@/lib/api";
 import { groupPapersByDay } from "@/lib/group-by-day";
@@ -13,6 +13,26 @@ const RANGE_OPTIONS: { value: DigestRange; label: string }[] = [
   { value: 30,    label: "30d" },
   { value: "all", label: "All" },
 ];
+
+type RangeCounts = Partial<Record<string, number>>;
+
+function rangeKey(r: DigestRange): string {
+  return String(r);
+}
+
+function countInRange(papers: Paper[], range: DigestRange): number {
+  if (range === "all") return papers.length;
+  const cutoffMs = Date.now() - range * 24 * 60 * 60 * 1000;
+  return papers.filter((p) => new Date(p.published).getTime() >= cutoffMs).length;
+}
+
+function computeAllCounts(papers: Paper[]): RangeCounts {
+  const out: RangeCounts = {};
+  for (const opt of RANGE_OPTIONS) {
+    out[rangeKey(opt.value)] = countInRange(papers, opt.value);
+  }
+  return out;
+}
 
 const TIER_META = {
   A: { label: "Must read",     icon: "🔥", color: "#fb7185" },
@@ -42,8 +62,12 @@ export function PaperList() {
   const [papers, setPapers] = useState<Paper[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeIndex, setActiveIndex] = useState(0);
+  const [rangeCounts, setRangeCounts] = useState<RangeCounts | null>(null);
   const navigate = useNavigate();
   const listRef = useRef<HTMLDivElement | null>(null);
+  const pickerRef = useRef<HTMLDivElement | null>(null);
+  const segRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  const [ink, setInk] = useState<{ left: number; width: number } | null>(null);
   const digestRange = useUiStore((s) => s.digestRange);
   const setDigestRange = useUiStore((s) => s.setDigestRange);
 
@@ -58,7 +82,14 @@ export function PaperList() {
           // empty result just means the DB really is that sparse.
           res = await api.digest(true, digestRange);
         }
-        if (!cancelled) setPapers(res.papers);
+        if (!cancelled) {
+          setPapers(res.papers);
+          // If the user is already viewing "all", we have everything we need
+          // to compute the counts for every segment — skip the extra fetch.
+          if (digestRange === "all") {
+            setRangeCounts(computeAllCounts(res.papers));
+          }
+        }
       } catch {
         if (!cancelled) setPapers([]);
       } finally {
@@ -67,6 +98,52 @@ export function PaperList() {
     })();
     return () => { cancelled = true; };
   }, [digestRange]);
+
+  // One-time background fetch for the full archive so every segment can show a
+  // real count without forcing the user to switch ranges. If the initial range
+  // is already "all", the primary effect above has already populated counts.
+  useEffect(() => {
+    if (rangeCounts) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await api.digest(false, "all");
+        if (!cancelled) setRangeCounts(computeAllCounts(res.papers));
+      } catch {
+        // Leave rangeCounts null; UI falls back to em-dashes.
+      }
+    })();
+    return () => { cancelled = true; };
+    // Deliberately runs only on mount — the "all" fetch is a one-shot.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Measure the active segment so the sliding indicator lines up precisely.
+  // Re-run on range change and on container resize (left panel collapse).
+  useLayoutEffect(() => {
+    function measure() {
+      const idx = RANGE_OPTIONS.findIndex((o) => o.value === digestRange);
+      const btn = segRefs.current[idx];
+      const container = pickerRef.current;
+      if (!btn || !container) return;
+      setInk({ left: btn.offsetLeft, width: btn.offsetWidth });
+    }
+    measure();
+    const container = pickerRef.current;
+    if (!container || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(container);
+    return () => ro.disconnect();
+  }, [digestRange]);
+
+  function handleRangeKeyDown(e: React.KeyboardEvent<HTMLButtonElement>, i: number) {
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    e.preventDefault();
+    const dir = e.key === "ArrowRight" ? 1 : -1;
+    const next = (i + dir + RANGE_OPTIONS.length) % RANGE_OPTIONS.length;
+    segRefs.current[next]?.focus();
+    setDigestRange(RANGE_OPTIONS[next].value);
+  }
 
   const hasTiers = papers.some((p) => p.ai_tier != null);
   const tierGroups = hasTiers ? groupByTier(papers) : null;
@@ -138,26 +215,55 @@ export function PaperList() {
       </div>
       <UrlBar onSubmit={(id) => navigate(`/reader/${id}`)} />
       <div
+        ref={pickerRef}
         role="tablist"
         aria-label="Archive range"
-        className="flex items-center gap-0.5 px-3 pb-2 pt-0"
+        className="relative rounded-xl border border-white/5 bg-white/[0.02] p-1 grid grid-cols-5 gap-0 mx-2 mb-2"
       >
-        {RANGE_OPTIONS.map((opt) => {
+        <div
+          aria-hidden
+          className="absolute top-1 bottom-1 rounded-lg pointer-events-none"
+          style={{
+            left: ink?.left ?? 0,
+            width: ink?.width ?? 0,
+            background: "var(--ac1-soft)",
+            boxShadow:
+              "0 0 0 1px var(--ac1-mid), 0 8px 20px -10px var(--ac1-mid)",
+            transition:
+              "left 260ms cubic-bezier(0.34, 1.56, 0.64, 1), width 260ms cubic-bezier(0.34, 1.56, 0.64, 1), opacity 160ms ease-out",
+            opacity: ink ? 1 : 0,
+            zIndex: 0,
+          }}
+        />
+        {RANGE_OPTIONS.map((opt, i) => {
           const active = digestRange === opt.value;
+          const count = rangeCounts?.[rangeKey(opt.value)];
           return (
             <button
               key={String(opt.value)}
+              ref={(el) => { segRefs.current[i] = el; }}
               role="tab"
+              aria-label={opt.label}
               aria-selected={active}
+              tabIndex={active ? 0 : -1}
               onClick={() => setDigestRange(opt.value)}
+              onKeyDown={(e) => handleRangeKeyDown(e, i)}
               className={[
-                "px-2 py-0.5 rounded-full text-[10.5px] font-medium transition-colors cursor-pointer",
-                active
-                  ? "bg-[color:var(--ac1-soft)] text-[color:var(--ac1)] border border-[color:var(--ac1-mid)]"
-                  : "text-slate-400 hover:text-slate-200 border border-transparent",
+                "relative z-[1] flex flex-col items-center justify-center py-1.5 rounded-lg cursor-pointer",
+                "transition-[color,transform] duration-150 active:scale-[0.97]",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--ac1-mid)]",
+                active ? "text-slate-100" : "text-slate-400 hover:text-slate-200",
               ].join(" ")}
             >
-              {opt.label}
+              <span className="text-[11px] font-medium leading-none">{opt.label}</span>
+              <span
+                className={[
+                  "text-[10px] font-mono tabular-nums leading-none mt-1",
+                  active ? "text-[color:var(--ac1)]" : "text-slate-500",
+                ].join(" ")}
+              >
+                {count === undefined ? "—" : count}
+              </span>
             </button>
           );
         })}
