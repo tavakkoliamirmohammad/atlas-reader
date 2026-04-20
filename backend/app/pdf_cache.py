@@ -19,11 +19,23 @@ def cache_path(arxiv_id: str) -> Path:
 async def ensure_cached(arxiv_id: str, timeout: float = 60.0) -> Path:
     """Return path to the cached PDF, downloading first if needed."""
     target = cache_path(arxiv_id)
+    # Single-writer assumption (v1): if two coroutines hit the same arxiv_id
+    # concurrently, both will download. The atomic rename below means the
+    # final file is intact, but bandwidth is wasted. Acceptable for local single-user.
     if not target.exists():
         async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
             resp = await client.get(PDF_URL_TEMPLATE.format(arxiv_id=arxiv_id))
             resp.raise_for_status()
-            target.write_bytes(resp.content)
+            if not resp.content.startswith(b"%PDF"):
+                raise ValueError(
+                    f"arXiv returned non-PDF content for {arxiv_id} "
+                    f"(first 20 bytes: {resp.content[:20]!r})"
+                )
+            # Write to .part then atomically rename so a crash mid-write
+            # never leaves a half-written PDF in the cache.
+            tmp = target.with_suffix(".pdf.part")
+            tmp.write_bytes(resp.content)
+            tmp.replace(target)
     if papers.get(arxiv_id) is not None:
         papers.set_pdf_path(arxiv_id, str(target))
     return target
