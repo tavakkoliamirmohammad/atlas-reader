@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { ChevronDown, ChevronRight } from "lucide-react";
 import {
   type GlossaryTerm,
   extractGlossary,
@@ -19,6 +20,7 @@ type DefState =
 const HOVER_DELAY_MS = 200;
 
 export function Glossary({ arxivId }: Props) {
+  const [open, setOpen] = useState(true);
   const [terms, setTerms] = useState<GlossaryTerm[] | null>(null);
   const [extracting, setExtracting] = useState(false);
   const [hoveredTerm, setHoveredTerm] = useState<string | null>(null);
@@ -105,86 +107,119 @@ export function Glossary({ arxivId }: Props) {
     setHoveredTerm(null);
   }
 
-  if (terms === null) {
-    return (
-      <div className="px-3 py-2 border-b border-white/5">
-        <div className="text-[10px] uppercase tracking-wider text-slate-500">Glossary</div>
-        <div className="mt-1 text-[11px] text-slate-500">Loading…</div>
-      </div>
-    );
-  }
-
-  if (terms.length === 0) {
-    return (
-      <div className="px-3 py-2 border-b border-white/5">
-        <div className="flex items-center justify-between">
-          <div className="text-[10px] uppercase tracking-wider text-slate-500">Glossary</div>
-          <button
-            onClick={build}
-            disabled={extracting}
-            className="px-2 py-0.5 rounded-md text-[10px] font-semibold cursor-pointer disabled:opacity-50 bg-white/[0.04] border border-white/10 text-slate-300 hover:bg-white/[0.08] hover:border-[color:var(--ac1-mid)] transition-colors"
-          >
-            {extracting ? "Extracting…" : "Build glossary"}
-          </button>
-        </div>
-      </div>
-    );
-  }
+  const count = terms?.length ?? 0;
+  // The Build button stays visible in the header when we have zero terms, regardless
+  // of collapse state (per UX spec).
+  const showBuildButton = terms !== null && count === 0;
 
   return (
-    <div className="px-3 py-2 border-b border-white/5">
-      <div className="text-[10px] uppercase tracking-wider text-slate-500 mb-1">Glossary</div>
-      <div className="flex flex-wrap gap-1">
-        {terms.map((t) => {
-          const def = defs[t.term];
-          const showTip = hoveredTerm === t.term;
-          return (
-            <div
-              key={t.id}
-              className="relative"
-              onMouseEnter={() => scheduleHover(t.term)}
-              onMouseLeave={cancelHover}
-              onFocus={() => scheduleHover(t.term)}
-              onBlur={cancelHover}
-            >
-              <span
-                tabIndex={0}
-                aria-describedby={showTip ? `glossary-tip-${t.id}` : undefined}
-                className="inline-block px-2 py-0.5 rounded-md text-[11px] cursor-help border border-[color:var(--ac1-mid)] bg-[color:var(--ac1-soft)] text-slate-200 hover:translate-y-[-1px] transition-transform"
-              >
-                {t.term}
-              </span>
-              {showTip && (
-                <div
-                  id={`glossary-tip-${t.id}`}
-                  role="tooltip"
-                  className="absolute z-50 left-0 top-full mt-1 w-64 max-w-[18rem] px-2.5 py-1.5 rounded-md text-[11px] leading-snug bg-slate-900/95 border border-white/10 text-slate-200 shadow-lg"
-                >
-                  {!def || def.status === "idle" || def.status === "loading" ? (
-                    <span className="text-slate-400">Loading…</span>
-                  ) : def.status === "ready" ? (
-                    <span>{def.text}</span>
-                  ) : (
-                    <div className="flex flex-col gap-1.5">
-                      <span className="text-rose-300 break-words">
-                        error: {def.message}
-                      </span>
-                      <button
-                        type="button"
-                        onMouseDown={(e) => e.preventDefault()}
-                        onClick={() => fetchDefinition(t.term)}
-                        className="self-start px-1.5 py-0.5 rounded text-[10px] font-semibold text-slate-200 bg-white/5 border border-white/10 hover:bg-white/10 hover:border-[color:var(--ac1-mid)] cursor-pointer transition-colors"
-                      >
-                        Retry
-                      </button>
-                    </div>
-                  )}
-                </div>
-              )}
+    <div className="border-b border-white/5">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center justify-between gap-2 px-4 py-2.5 text-left hover:bg-white/[0.02] transition-colors"
+        aria-expanded={open}
+      >
+        <span className="flex items-center gap-2">
+          {open
+            ? <ChevronDown size={14} className="text-slate-400" />
+            : <ChevronRight size={14} className="text-slate-400" />}
+          <span className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold">
+            Glossary
+          </span>
+          {count > 0 && (
+            <span className="text-[10px] text-slate-500 font-mono">{count}</span>
+          )}
+        </span>
+        {showBuildButton && (
+          <span
+            role="button"
+            tabIndex={0}
+            aria-label="Build glossary"
+            aria-disabled={extracting}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (!extracting) build();
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                e.stopPropagation();
+                if (!extracting) build();
+              }
+            }}
+            className="px-2 py-0.5 rounded-md text-[10px] font-semibold cursor-pointer aria-disabled:opacity-50 bg-white/[0.04] border border-white/10 text-slate-300 hover:bg-white/[0.08] hover:border-[color:var(--ac1-mid)] transition-colors"
+          >
+            {extracting ? "Extracting…" : "Build glossary"}
+          </span>
+        )}
+      </button>
+
+      {open && (
+        <div className="px-3 pb-3">
+          {terms === null ? (
+            <div className="text-[11px] text-slate-500 px-1 py-1 leading-relaxed">
+              Loading…
             </div>
-          );
-        })}
-      </div>
+          ) : count === 0 ? (
+            <div className="text-[11px] text-slate-500 px-1 py-1 leading-relaxed">
+              No terms yet — click Build glossary to extract.
+            </div>
+          ) : (
+            <div className="flex flex-wrap gap-1">
+              {terms.map((t) => {
+                const def = defs[t.term];
+                const showTip = hoveredTerm === t.term;
+                return (
+                  <div
+                    key={t.id}
+                    className="relative"
+                    onMouseEnter={() => scheduleHover(t.term)}
+                    onMouseLeave={cancelHover}
+                    onFocus={() => scheduleHover(t.term)}
+                    onBlur={cancelHover}
+                  >
+                    <span
+                      tabIndex={0}
+                      aria-describedby={showTip ? `glossary-tip-${t.id}` : undefined}
+                      className="inline-block px-2 py-0.5 rounded-md text-[11px] cursor-help border border-[color:var(--ac1-mid)] bg-[color:var(--ac1-soft)] text-slate-200 hover:translate-y-[-1px] transition-transform"
+                    >
+                      {t.term}
+                    </span>
+                    {showTip && (
+                      <div
+                        id={`glossary-tip-${t.id}`}
+                        role="tooltip"
+                        className="absolute z-50 left-0 top-full mt-1 w-64 max-w-[18rem] px-2.5 py-1.5 rounded-md text-[11px] leading-snug bg-slate-900/95 border border-white/10 text-slate-200 shadow-lg"
+                      >
+                        {!def || def.status === "idle" || def.status === "loading" ? (
+                          <span className="text-slate-400">Loading…</span>
+                        ) : def.status === "ready" ? (
+                          <span>{def.text}</span>
+                        ) : (
+                          <div className="flex flex-col gap-1.5">
+                            <span className="text-rose-300 break-words">
+                              error: {def.message}
+                            </span>
+                            <button
+                              type="button"
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={() => fetchDefinition(t.term)}
+                              className="self-start px-1.5 py-0.5 rounded text-[10px] font-semibold text-slate-200 bg-white/5 border border-white/10 hover:bg-white/10 hover:border-[color:var(--ac1-mid)] cursor-pointer transition-colors"
+                            >
+                              Retry
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
