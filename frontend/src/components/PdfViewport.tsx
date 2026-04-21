@@ -670,8 +670,11 @@ export function PdfViewport({
           </div>
         ))}
 
-        {/* Loading overlay — richer card with download progress + phase. */}
-        {loading && <LoadingCard phase={loadPhase} />}
+        {/* Loading overlay — richer card with download progress + phase.
+            Gate visibility on a delay+min-duration so sub-150ms loads don't
+            flash, and once shown the card stays for at least 450ms so the
+            slide-up animation is perceivable. */}
+        <GatedLoadingCard loading={loading} phase={loadPhase} />
 
         {/* Error overlay. */}
         {error && (
@@ -699,6 +702,50 @@ export function PdfViewport({
 
 // ---------------------------------------------------------------------------
 // Loading card
+
+/**
+ * Gate around LoadingCard that adds two UX rules:
+ *
+ * - **Show delay (150 ms):** PDFs served from the local cache load in well
+ *   under 100 ms, which caused the card to appear and disappear in a single
+ *   frame (not user-visible). Waiting 150 ms before first render skips those
+ *   fast loads entirely.
+ * - **Minimum visible duration (450 ms):** Once the card is shown, keep it
+ *   on-screen long enough that the slide-up animation completes and the user
+ *   actually registers the indicator — even if the underlying `loading`
+ *   state flips back to `false` immediately after.
+ */
+function GatedLoadingCard({ loading, phase }: { loading: boolean; phase: LoadPhase }) {
+  const [visible, setVisible] = useState(false);
+  const shownAtRef = useRef<number | null>(null);
+  const timersRef = useRef<number[]>([]);
+
+  useEffect(() => {
+    const timers = timersRef.current;
+    if (loading) {
+      // Defer first render so fast loads never show anything.
+      const t = window.setTimeout(() => {
+        setVisible(true);
+        shownAtRef.current = Date.now();
+      }, 150);
+      timers.push(t);
+    } else if (visible) {
+      // Enforce minimum visible duration before hiding.
+      const elapsed = shownAtRef.current ? Date.now() - shownAtRef.current : 0;
+      const remaining = Math.max(0, 450 - elapsed);
+      const t = window.setTimeout(() => setVisible(false), remaining);
+      timers.push(t);
+    }
+    return () => {
+      timers.forEach((id) => window.clearTimeout(id));
+      timersRef.current = [];
+    };
+  }, [loading, visible]);
+
+  if (!visible) return null;
+  return <LoadingCard phase={phase} />;
+}
+
 
 function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
