@@ -31,4 +31,14 @@ export const QUICK_PROMPTS: QuickPrompt[] = [
       "Walk me through the exact setup needed to reproduce the main result: hardware, dataset, baselines, command lines if available.",
     icon: "⚙",
   },
+  {
+    label: "Flow diagram",
+    prompt:
+      "Produce a diagram of the paper's core method / system as a Mermaid flowchart (```mermaid fence, `flowchart TD` or `flowchart LR`). " +
+      "Nodes should be concrete components / stages from the paper; edges should carry short labels describing what flows between them. " +
+      "Aim for 6–15 nodes — enough to show the structure but not every detail. " +
+      "Above the diagram, write one short paragraph explaining what the diagram depicts. " +
+      "Below the diagram, also provide an ASCII-art version in a fenced code block using box-drawing characters (┌┐└┘│─→), so the flow is readable even without a Mermaid renderer.",
+    icon: "◇",
+  },
 ];

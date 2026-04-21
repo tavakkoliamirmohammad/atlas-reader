@@ -224,6 +224,18 @@ def cmd_up() -> int:
     return 0
 
 
+def cmd_start_runner() -> int:
+    """Start ONLY the host AI runner (no backend). Used with Docker Compose."""
+    _start_runner()
+    return 0
+
+
+def cmd_stop_runner() -> int:
+    """Stop ONLY the host AI runner. Leaves any running backend alone."""
+    _stop_runner()
+    return 0
+
+
 def cmd_doctor() -> int:
     """Print the live security posture of the runner + backend."""
     print("=== Atlas doctor ===")
@@ -260,6 +272,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     sub = parser.add_subparsers(dest="cmd", required=True)
     for name in (
         "start", "stop", "status", "logs", "runner-logs",
+        "start-runner", "stop-runner",
         "open", "restart", "up", "doctor",
         "install-launchd", "uninstall-launchd",
     ):
@@ -271,6 +284,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         "status":            cmd_status,
         "logs":              cmd_logs,
         "runner-logs":       cmd_runner_logs,
+        "start-runner":      cmd_start_runner,
+        "stop-runner":       cmd_stop_runner,
         "open":              cmd_open,
         "restart":           cmd_restart,
         "up":                cmd_up,

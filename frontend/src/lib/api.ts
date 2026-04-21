@@ -229,6 +229,28 @@ export type SearchResult = {
 
 export type SearchResponse = { count: number; results: SearchResult[] };
 
+export async function importPdfUrl(url: string): Promise<string> {
+  const r = await fetch("/api/papers/import-url", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ url }),
+  });
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(body.detail || `import-url -> ${r.status}`);
+  return body.arxiv_id as string;
+}
+
+
+export async function importPdfUpload(file: File): Promise<string> {
+  const form = new FormData();
+  form.append("file", file, file.name);
+  const r = await fetch("/api/papers/import-upload", { method: "POST", body: form });
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(body.detail || `import-upload -> ${r.status}`);
+  return body.arxiv_id as string;
+}
+
+
 export async function searchPapers(
   query: string,
   limit = 20,

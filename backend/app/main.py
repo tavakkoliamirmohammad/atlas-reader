@@ -26,12 +26,14 @@ from app import (
     glossary,
     health,
     highlights,
+    imports,
     papers,
     pdf_cache,
     search,
     stats,
     summarizer,
 )
+from fastapi import UploadFile, File, Form
 
 
 async def _daily_build_loop() -> None:
@@ -142,11 +144,16 @@ class ArxivUnavailable(Exception):
 async def _ensure_paper_imported(arxiv_id: str) -> bool:
     """If the paper isn't in the DB, fetch it from arXiv and insert. Return True if known.
 
+    For `custom-*` ids (URL/upload imports), arXiv is never consulted — we
+    only check whether the row already exists.
+
     Raises `ArxivUnavailable` on throttle/timeout so the endpoint can turn that
     into a 503 with a clear message, rather than an opaque 500.
     """
     if papers.get(arxiv_id) is not None:
         return True
+    if imports.is_custom_id(arxiv_id):
+        return False
     try:
         paper = await arxiv.fetch_by_id(arxiv_id)
     except httpx.HTTPStatusError as exc:
@@ -178,13 +185,26 @@ async def get_paper(arxiv_id: str) -> dict:
 
 @app.get("/api/pdf/{arxiv_id}")
 async def get_pdf(arxiv_id: str):
-    """Stream the PDF directly from arXiv on every request (no persistent disk cache)."""
+    """Serve the PDF. For custom imports, read from disk. For arXiv papers,
+    stream directly from arxiv.org on every request (no persistent disk cache).
+    """
     try:
         imported = await _ensure_paper_imported(arxiv_id)
     except ArxivUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc))
     if not imported:
-        raise HTTPException(status_code=404, detail="paper not found on arXiv")
+        raise HTTPException(status_code=404, detail="paper not found")
+
+    # Custom imports (URL/upload) live on disk only.
+    if imports.is_custom_id(arxiv_id):
+        local = db.data_dir() / "pdfs" / f"{arxiv_id}.pdf"
+        if not local.exists():
+            raise HTTPException(status_code=404, detail="imported PDF file is missing")
+        return FileResponse(
+            local,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'inline; filename="{arxiv_id}.pdf"'},
+        )
 
     pdf_url = f"https://arxiv.org/pdf/{arxiv_id}"
 
@@ -227,6 +247,34 @@ async def get_pdf(arxiv_id: str):
 @app.get("/api/stats")
 async def get_stats() -> dict:
     return stats.summary()
+
+
+class ImportUrlBody(BaseModel):
+    url: str
+
+
+@app.post("/api/papers/import-url")
+async def post_import_url(body: ImportUrlBody) -> dict:
+    """Download a PDF from `url`, store it, return the synthetic paper id."""
+    try:
+        arxiv_id, _paper = await imports.import_from_url(body.url)
+    except imports.ImportError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"arxiv_id": arxiv_id}
+
+
+@app.post("/api/papers/import-upload")
+async def post_import_upload(file: UploadFile = File(...)) -> dict:
+    """Accept a multipart-uploaded PDF, store it, return the synthetic paper id."""
+    content = await file.read()
+    try:
+        arxiv_id, _paper = imports.import_from_upload(
+            file.filename or "upload.pdf",
+            content,
+        )
+    except imports.ImportError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"arxiv_id": arxiv_id}
 
 
 class AskBody(BaseModel):

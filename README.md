@@ -1,113 +1,117 @@
 # Atlas
 
-Local-first paper reviewer for compilers / MLIR / DSL research. Reads arXiv every morning, ranks / summarizes / answers follow-ups using your local AI CLI. **$0 recurring cost** — uses your subscription via `claude -p` or `codex exec`.
+Local-first paper reviewer for compilers / MLIR / DSL research. Reads arXiv every morning, ranks / summarizes / answers follow-ups using your local AI CLI. **$0 recurring cost** — uses your subscription via `codex exec` (default) or `claude -p`.
 
-## Status
+## Prerequisites
 
-**v1 complete.** Plans 1-4 shipped, plus Codex backend + Docker-AI integration:
+One-time host-side setup:
 
-- **Plan 1 — Backend:** FastAPI, SQLite, arXiv fetch, PDF streaming, CLI
-- **Plan 2 — Frontend shell:** React + Vite + Tailwind, embedded PDF reader, 6 themes, Light/Sepia/Dark
-- **Plan 3 — AI features:** tier ranking, streamed 10-section summary, chat Q&A, persisted history
-- **Plan 4 — Polish + ops:** keyboard shortcuts, Cmd+K command palette, ? shortcuts overlay, streak badge, launchd autostart
-- **Plan 5 — Multi-backend + Docker-AI:** Codex backend, per-session picker in the top bar (Codex / Claude), host AI runner daemon so the Docker build can call out to Keychain-auth'd CLIs. Default backend: **Codex**.
+| Tool | Install | Why |
+| --- | --- | --- |
+| Docker Desktop | [docker.com](https://www.docker.com/products/docker-desktop/) | Runs the Atlas container |
+| Python 3.12+ | `brew install python@3.12` | Runs the host AI runner (subprocess wrapper around your CLIs) |
+| Codex CLI | `brew install --cask codex` then `codex login` | Default AI backend; uses your ChatGPT subscription |
+| Claude Code CLI (optional) | [install](https://docs.claude.com/en/docs/claude-code) | Alternative AI backend; uses your Claude Pro/Max subscription |
 
-## Quick start
+You need at least one of Codex / Claude installed and logged in. The Codex and Claude CLIs are macOS-native binaries whose credentials live in `~/.codex/` and the macOS Keychain — neither can run inside a Linux container. Atlas solves this with a tiny **host-side runner** that the container calls through `host.docker.internal`.
+
+## Start / stop the project (Docker-only)
+
+One-time bootstrap (first run ever):
 
 ```bash
+git clone <repo> paper-dashboard
+cd paper-dashboard
 python3.12 -m venv .venv
 source .venv/bin/activate
-pip install -e ".[dev]"
-
-cd frontend
-pnpm install
-pnpm build
-cd ..
-
-atlas up      # build + start + open in browser
+pip install -e .                       # installs the `atlas` CLI (runner only)
 ```
 
-## Autostart on login
+Every time you want to use it:
 
 ```bash
-atlas install-launchd     # writes ~/Library/LaunchAgents/com.amir.atlas.plist
+# 1. Start the host runner (needed so the container can reach your CLIs).
+#    Generates ~/.atlas/runner.secret on first run (mode 0600).
+source .venv/bin/activate
+atlas start-runner
+
+# 2. Start Atlas in Docker. Rebuilds on code changes.
+docker compose up --build -d
+
+# 3. Open the app.
+open http://localhost:8765
 ```
 
-To remove: `atlas uninstall-launchd`.
+To shut everything down cleanly:
+
+```bash
+docker compose down            # stops the container
+atlas stop-runner              # stops the host runner
+```
+
+That's the whole lifecycle. Data (papers DB, PDFs, runner secret) lives in `~/.atlas/` and survives across restarts.
+
+### Status / logs
+
+```bash
+atlas status                   # runner: running / not running
+docker compose ps              # container status
+docker compose logs -f atlas   # tail the backend log
+atlas runner-logs              # tail the host AI runner log
+atlas doctor                   # print live security posture
+```
+
+## How the pieces fit
+
+```
+[ Mac host ]                                 [ Docker container ]
+ ┌── atlas-ai-runner ──┐                      ┌── atlas backend ──┐
+ │ 127.0.0.1:8766       │  ←── HTTP (NDJSON) ──│ FastAPI on :8765   │
+ │ spawns codex / claude│      bearer-auth'd    │ sends typed jobs   │
+ │ (uses your subscription)                     │                    │
+ └──────────────────────┘                      └────────────────────┘
+         ▲                                             ▲
+         │                                             │
+         └───────── ~/.atlas/ (shared volume) ─────────┘
+            (PDFs, SQLite DB, runner secret)
+```
+
+- Container backend serves HTTP, renders the UI, orchestrates work.
+- Host runner spawns the CLI subprocesses (where Keychain creds live).
+- Both read/write the same physical `~/.atlas/` so PDFs and DB state are shared.
 
 ## AI backends
 
-Atlas supports two AI backends, picked in the top bar. **Default is Codex**; Claude is one click away.
-
-| Backend | CLI needed | Auth |
+| Backend | CLI | Auth |
 | --- | --- | --- |
-| Codex | `codex` (install via Homebrew; OpenAI's Codex CLI) | stored in `~/.codex/` after `codex login` |
-| Claude | `claude` (Claude Code CLI) | macOS Keychain after `claude` first run |
+| **Codex (default)** | `codex` | `~/.codex/` after `codex login` (ChatGPT plan) |
+| Claude | `claude` | macOS Keychain after `claude` first run (Claude Pro/Max plan) |
 
-Both stream output to the UI. Rankers, summarizers, and chat all honor the picker. A backend that isn't installed is greyed out in the picker; `/api/health` returns `{claude, codex}` per-backend availability.
+Pick in the top-bar segmented control. The Codex model dropdown shows every model your `codex` CLI lists (GPT-5.4, GPT-5.4 mini, GPT-5.3 Codex, etc.). The Claude dropdown shows Opus / Sonnet / Haiku. A backend that isn't installed is greyed out; `/api/health` reports per-backend availability.
 
-### Codex safety
+### Safety posture
 
-Every `codex exec` invocation Atlas makes is forced to `--sandbox read-only` (overrides ambient `~/.codex/config.toml`), so papers-as-prompt-injection can't escalate to file writes or shell commands. Claude calls use `--allowedTools Read` only.
+- **Codex** is always invoked with `--sandbox read-only` + `-c sandbox_mode="read-only"` (overrides any ambient `~/.codex/config.toml`) and `--skip-git-repo-check` so it works from `~/.atlas/`.
+- **Claude** is restricted to `--allowedTools Read` when PDF access is needed, nothing else.
+- The host runner binds loopback only, requires a bearer token on every call, validates the Host header (DNS-rebinding defense), enforces per-backend model allowlists, rate-limits 30 req/min with 4 concurrent, and logs only structured events (no prompt or response text).
 
-## Docker
+`atlas doctor` prints all of this at runtime.
 
-Spin up with two commands:
+## Importing papers
 
-```bash
-atlas start          # starts the host AI runner (one-time setup; generates ~/.atlas/runner.secret)
-docker compose up --build
-```
+Three ways to open a paper:
 
-Open http://localhost:8765.
+1. **arXiv** — paste an arXiv URL or ID into the left-panel URL bar.
+2. **Any PDF URL** — paste a direct PDF URL; Atlas downloads it and creates a synthetic id (`custom-<sha>`).
+3. **Local upload** — click "Upload PDF" under the URL bar; imported into the same storage.
 
-Data persists in `./atlas-data/` (mounted into the container at `/data`).
+All three land in the same SQLite row; Summarize / Ask / Flow diagram all work on any of them.
 
-### How Docker gets AI access
+## Automatic daily refresh
 
-The Codex and Claude CLIs are macOS-native arm64 binaries whose credentials live in Keychain — neither can run inside a Linux container. Instead, `atlas start` spawns a small **host-side AI runner** (`atlas-ai-runner`) on `127.0.0.1:8766` that the container calls through `host.docker.internal:8766`. The runner:
+A scheduler inside the backend container runs hourly: if today's digest hasn't been built yet, it fetches arXiv (without AI ranking — cheap) so the list is fresh without you clicking anything. Manual rebuild: `curl "http://localhost:8765/api/digest?build=true"`.
 
-- Binds loopback only; rejects non-loopback `Host:` headers (DNS-rebinding defense).
-- Requires a bearer token from `~/.atlas/runner.secret` (auto-generated, mode 0600). `docker compose` reads it via `env_file: ~/.atlas/runner.env`.
-- Accepts only typed jobs (`backend + task + model + prompt + directive`). No raw argv. Model allowlists + directive sanitization prevent argv smuggling.
-- Rate-limits 30 req/min, max 4 concurrent, per-task timeout 60–180 s.
-- Logs structured events only — no prompt or response text.
-
-`atlas stop` kills both the backend and the runner. `atlas doctor` prints the live security posture.
-
-### Prebuilt image (GHCR)
-
-Every push to `main` publishes a multi-tag image to GitHub Container Registry:
-
-```bash
-atlas start
-docker run --rm -p 8765:8765 --env-file ~/.atlas/runner.env \
-  -e ATLAS_AI_PROXY=http://host.docker.internal:8766 \
-  -v $(pwd)/atlas-data:/data \
-  ghcr.io/tavakkoliamirmohammad/atlas-reader:latest
-```
-
-Tags available: `latest`, `main`, a short commit SHA (e.g. `sha-75ccae5`), and any semver tag you push (`v0.1.0` → both `v0.1.0` and `0.1.0`).
-
-### Running without the host runner
-
-If you don't run `atlas start` on the host, `/api/health` inside the container reports both backends as unavailable and Ask/Summarize return 503. The reader, digest (unranked), highlights, search, and archive range selector all still work.
-
-## CLI
-
-| Command | What it does |
-| --- | --- |
-| `atlas up` | Build frontend + start backend + runner + open browser (the one command) |
-| `atlas start` | Start the backend on 8765 + AI runner on 8766 |
-| `atlas stop` | Stop both |
-| `atlas restart` | Stop + start (no rebuild) |
-| `atlas status` | Show both pids + URLs |
-| `atlas logs` | Print the backend log |
-| `atlas runner-logs` | Print the AI runner log |
-| `atlas doctor` | Print live security posture (secret file mode, sandbox flags, rate limit) |
-| `atlas open` | Open the dashboard in the default browser |
-| `atlas install-launchd` | Install login-autostart plist |
-| `atlas uninstall-launchd` | Remove the plist |
+arXiv occasionally rate-limits; the client retries 429/timeouts with backoff (2s → 6s → 15s). If it eventually gives up, the UI shows whatever papers are already cached instead of an error.
 
 ## Keyboard shortcuts
 
@@ -124,29 +128,48 @@ If you don't run `atlas start` on the host, `/api/health` inside the container r
 
 - `GET /api/health` — `{ai, backends: {claude, codex}, default_backend, papers_today}`
 - `GET /api/stats` — streak, total papers, papers today
-- `GET /api/digest?build=true[&backend=claude|codex]` — fetch + rank today's arXiv papers
-- `GET /api/papers/{arxiv_id}` — single paper (auto-imports unknown IDs from arXiv)
-- `GET /api/pdf/{arxiv_id}` — streams PDF directly from arXiv (no disk cache)
+- `GET /api/digest?build=true[&backend=claude|codex&rank=false]`
+- `GET /api/papers/{arxiv_id}` — metadata (auto-imports arXiv IDs; `custom-*` ids are local-only)
+- `GET /api/pdf/{arxiv_id}` — PDF bytes (arXiv ids streamed from arxiv.org, `custom-*` ids served from disk)
+- `POST /api/papers/import-url` — body `{url}` → `{arxiv_id: "custom-..."}`
+- `POST /api/papers/import-upload` — multipart file → `{arxiv_id: "custom-..."}`
 - `POST /api/summarize/{arxiv_id}[?backend=claude|codex&model=...]` — SSE summary
 - `POST /api/ask/{arxiv_id}[?backend=claude|codex&model=...]` — SSE chat; body `{question, history}`
 - `GET /api/conversations/{arxiv_id}` — persisted chat history
 - `GET /api/build-progress?date=YYYY-MM-DD` — SSE digest build progress
 
-`model=` is a Claude-specific override (`opus`/`sonnet`/`haiku`); Codex picks its own model per task. Omitting `backend=` falls back to the server default (`codex`).
-
 ## Data
 
-Lives at `~/.atlas/`:
-- `atlas.db` — SQLite (papers, builds, conversations, prefs, events)
-- `atlas.log` — backend log
+Everything lives under `~/.atlas/` (shared between host and container):
 
-Override with `ATLAS_DATA_DIR=/some/path`.
+- `atlas.db` — SQLite (papers, builds, conversations, highlights, glossary, prefs, events)
+- `pdfs/` — cached PDFs (arXiv + custom imports)
+- `runner.secret` — bearer token for host↔container AI calls (mode 0600)
+- `runner.env` — KEY=VALUE version of the same secret, consumed by docker-compose
+- `atlas-runner.log` — runner log
+
+Override with `ATLAS_DATA_DIR=/some/path` (set on both the host and in docker-compose environment for consistency).
+
+## Prebuilt image (GHCR)
+
+Every push to `main` publishes a multi-tag image. Instead of `docker compose up --build`, you can skip the build:
+
+```bash
+atlas start-runner
+docker run --rm -p 8765:8765 \
+  --env-file ~/.atlas/runner.env \
+  -e ATLAS_AI_PROXY=http://host.docker.internal:8766 \
+  -e ATLAS_DATA_DIR=${HOME}/.atlas \
+  -v ${HOME}/.atlas:${HOME}/.atlas \
+  ghcr.io/tavakkoliamirmohammad/atlas-reader:latest
+```
 
 ## Tests
 
 ```bash
-pytest -v          # backend
-cd frontend && pnpm test:run
+source .venv/bin/activate
+pytest -q                              # backend (169 tests)
+cd frontend && pnpm test:run           # frontend (37 tests)
 ```
 
 ## Design
