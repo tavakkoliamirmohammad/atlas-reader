@@ -278,7 +278,7 @@ export function StreamingMessage({ role, content, isStreaming, model }: Props) {
             <ReactMarkdown
               remarkPlugins={[remarkGfm, remarkMath]}
               rehypePlugins={[rehypeKatex]}
-              components={markdownComponents(isStreaming)}
+              components={markdownComponents(!!isStreaming)}
             >
               {isStreaming ? sanitizeStreamingMarkdown(content) : content}
             </ReactMarkdown>
