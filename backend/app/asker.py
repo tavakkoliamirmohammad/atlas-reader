@@ -72,8 +72,14 @@ async def ask(
     *,
     backend: str = ai_backend.DEFAULT_BACKEND,
     model: Optional[str] = None,
+    display: Optional[str] = None,
 ) -> AsyncIterator[str]:
-    """Yield answer chunks as they stream, then persist the turn."""
+    """Yield answer chunks as they stream, then persist the turn.
+
+    `display` is an optional short label to persist in place of the full
+    `question` body. Quick-action chips pass this so the chat log reads
+    "Flow diagram" instead of the multi-line prompt template.
+    """
     if papers.get(arxiv_id) is None:
         raise KeyError(arxiv_id)
 
@@ -115,5 +121,6 @@ async def ask(
         # that would confuse the next turn.
         answer = "".join(parts).strip()
         if answer:
-            conversations.append(arxiv_id, "user", question)
+            user_row_content = (display or "").strip() or question
+            conversations.append(arxiv_id, "user", user_row_content)
             conversations.append(arxiv_id, "assistant", answer, model=resolved_model)

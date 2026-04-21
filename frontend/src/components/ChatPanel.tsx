@@ -194,7 +194,7 @@ export function ChatPanel() {
   useEffect(() => {
     if (!arxivId || streaming) return;
     if (!askRequest) return;
-    void send(askRequest.prompt);
+    void send(askRequest.prompt, askRequest.displayLabel);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [askRequest]);
 
@@ -219,7 +219,15 @@ export function ChatPanel() {
     });
   }
 
-  async function send(overridePrompt?: string) {
+  /**
+   * @param overridePrompt — the full text sent to the LLM. When omitted, the
+   *   textarea draft is used.
+   * @param displayAs — optional short label to render as the user's chat
+   *   bubble in place of the full prompt. Used by quick-action chips so the
+   *   chat shows "Flow diagram" instead of the 8-line instruction block.
+   *   The actual payload to the model is still `overridePrompt`.
+   */
+  async function send(overridePrompt?: string, displayAs?: string) {
     const typed = (overridePrompt ?? draft).trim();
     if (!arxivId || streaming) return;
     if (!typed && !pinnedQuote) return;
@@ -231,19 +239,27 @@ export function ChatPanel() {
     setDraft("");
     clearPinnedQuote();
     const activeModel = backend === "claude" ? model : codexModel;
+    const userBubble = displayAs?.trim() || question;
     setMessages((m) => [
       ...m,
-      { role: "user", content: question },
+      { role: "user", content: userBubble },
       { role: "assistant", content: "", model: activeModel },
     ]);
     setStreaming(true);
     abortRef.current = new AbortController();
     try {
-      await streamAsk(arxivId, question, historyForBackend, {
-        onChunk: appendChunk,
-        onDone: () => setStreaming(false),
-        onError: (e) => { appendChunk(`\n\n[error: ${e}]`); setStreaming(false); },
-      }, abortRef.current.signal, backend === "claude" ? model : codexModel, backend);
+      await streamAsk(
+        arxivId, question, historyForBackend,
+        {
+          onChunk: appendChunk,
+          onDone: () => setStreaming(false),
+          onError: (e) => { appendChunk(`\n\n[error: ${e}]`); setStreaming(false); },
+        },
+        abortRef.current.signal,
+        backend === "claude" ? model : codexModel,
+        backend,
+        displayAs?.trim() || undefined,
+      );
     } catch {
       setStreaming(false);
     }
@@ -267,8 +283,8 @@ export function ChatPanel() {
     }
   }
 
-  function quickAsk(prompt: string) {
-    void send(prompt);
+  function quickAsk(prompt: string, displayLabel?: string) {
+    void send(prompt, displayLabel);
   }
 
   return (

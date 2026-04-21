@@ -107,6 +107,7 @@ export async function streamAsk(
   signal?: AbortSignal,
   model?: AnyModel,
   backend?: Backend,
+  display?: string,
 ): Promise<void> {
   const url = _withQuery(`/api/ask/${arxivId}`, { model, backend });
   return streamSSE(
@@ -114,7 +115,10 @@ export async function streamAsk(
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ question, history }),
+      // `display` is what gets persisted as the user's message and shown in
+      // the bubble. `question` stays internal — the model sees it, but the
+      // chat log never does.
+      body: JSON.stringify({ question, history, display }),
     },
     handlers,
     signal,

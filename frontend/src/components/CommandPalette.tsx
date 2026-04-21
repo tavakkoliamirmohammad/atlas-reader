@@ -88,7 +88,7 @@ export function CommandPalette({ open, onClose, onSearch, onShowShortcuts }: Pro
                   disabled={!currentArxivId}
                   onSelect={() => {
                     if (!currentArxivId) return;
-                    requestAsk(q.prompt);
+                    requestAsk(q.prompt, q.displayLabel);
                     onClose();
                   }}
                   className="cursor-pointer rounded px-2 py-2 text-sm text-zinc-200 aria-selected:bg-white/10 data-[disabled=true]:cursor-not-allowed data-[disabled=true]:opacity-40"

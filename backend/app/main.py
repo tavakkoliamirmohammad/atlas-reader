@@ -311,6 +311,10 @@ class AskBody(BaseModel):
     history: list[dict] = []
     model: str | None = None
     backend: str | None = None
+    # When given, this is what's persisted + rendered as the user's chat
+    # bubble instead of `question`. Used by the quick-action chips so the
+    # chat log reads "Flow diagram" rather than the 8-line prompt template.
+    display: str | None = None
 
 
 def _sse_format(chunk: str) -> bytes:
@@ -385,6 +389,7 @@ async def post_ask(
             async for chunk in asker.ask(
                 arxiv_id, body.question, body.history,
                 backend=chosen_backend, model=chosen_model,
+                display=body.display,
             ):
                 yield _sse_format(chunk)
             yield b"event: done\ndata: ok\n\n"

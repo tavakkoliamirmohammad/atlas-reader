@@ -11,7 +11,7 @@ export type AppMode = "dark" | "light";
 
 export type CustomPalette = { c1: string; c2: string; ink: string };
 
-export type AskRequest = { id: number; prompt: string };
+export type AskRequest = { id: number; prompt: string; displayLabel?: string };
 
 type UiState = {
   paletteId: string;
@@ -45,7 +45,7 @@ type UiState = {
   setModel: (m: ModelChoice) => void;
   setLastHighlightColor: (c: HighlightColor) => void;
   requestSummarize: () => void;
-  requestAsk: (prompt: string) => void;
+  requestAsk: (prompt: string, displayLabel?: string) => void;
   cycleReadingMode: () => void;
 };
 
@@ -84,9 +84,9 @@ export const useUiStore = create<UiState>()(
       setModel: (m) => set({ model: m }),
       setLastHighlightColor: (c) => set({ lastHighlightColor: c }),
       requestSummarize: () => set((s) => ({ summarizeRequestId: s.summarizeRequestId + 1 })),
-      requestAsk: (prompt) =>
+      requestAsk: (prompt, displayLabel) =>
         set((s) => ({
-          askRequest: { id: (s.askRequest?.id ?? 0) + 1, prompt },
+          askRequest: { id: (s.askRequest?.id ?? 0) + 1, prompt, displayLabel },
         })),
       cycleReadingMode: () =>
         set((s) => {
