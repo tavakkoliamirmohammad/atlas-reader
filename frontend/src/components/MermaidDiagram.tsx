@@ -15,8 +15,15 @@ import { useUiStore } from "@/stores/ui-store";
 type Props = { code: string };
 
 function sanitizeSvg(svg: string): string {
+  // Mermaid v11 still emits node labels as <foreignObject><div>…</div></foreignObject>
+  // even with flowchart.htmlLabels=false, so the strict SVG profile alone
+  // leaves every node empty. We allow the foreignObject wrapper + the safe
+  // HTML tags mermaid uses inside (div/span/p/br) while keeping the rest of
+  // the strict profile — no <script>, <iframe>, event handlers, etc.
   return DOMPurify.sanitize(svg, {
-    USE_PROFILES: { svg: true, svgFilters: true },
+    USE_PROFILES: { svg: true, svgFilters: true, html: true },
+    ADD_TAGS: ["foreignObject"],
+    ADD_ATTR: ["xmlns", "requiredExtensions"],
   });
 }
 
