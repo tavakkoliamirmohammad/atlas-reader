@@ -3,6 +3,7 @@ import { ThemePicker } from "./ThemePicker";
 import { PanelToggles } from "./PanelToggles";
 import { AiStatusPill } from "./AiStatusPill";
 import { BackendPicker } from "./BackendPicker";
+import { AppModeToggle } from "./AppModeToggle";
 import { Greeting } from "./Greeting";
 import { Streak } from "./Streak";
 import { api } from "@/lib/api";
@@ -34,6 +35,7 @@ export function TopBar() {
       <div className="flex-1" />
       <BackendPicker available={backends} />
       <ThemePicker />
+      <AppModeToggle />
       <PanelToggles />
       <AiStatusPill ai={ai} />
       <Streak />

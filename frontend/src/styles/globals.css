@@ -69,6 +69,83 @@ body { background: #08080d; color: #e5e7ef; font-family: Inter, system-ui, sans-
   display: flex; flex-direction: column;
 }
 
+/* ---------- Light app mode ----------
+   An opt-in override layer. `html[data-app-mode="light"]` re-skins the chrome
+   without rewriting component styles: backgrounds go white, white/X
+   transparencies flip to black/X, slate text darkens. The dark mode is still
+   the default; flipping back is as simple as removing the attribute. */
+html[data-app-mode="light"] body {
+  background: #ffffff;
+  color: #0f172a;
+}
+html[data-app-mode="light"] .stage-shell {
+  background: #f8fafc;
+}
+html[data-app-mode="light"] .aurora-bg {
+  opacity: 0.14;       /* dial back so the white canvas doesn't read as a gradient */
+  filter: blur(90px);
+}
+html[data-app-mode="light"] .glass-panel {
+  background: rgba(255, 255, 255, 0.82);
+  border-color: rgba(15, 23, 42, 0.08) !important;
+}
+html[data-app-mode="light"] .markdown-body strong { color: #0f172a; }
+html[data-app-mode="light"] .markdown-body em { color: #1e293b; }
+html[data-app-mode="light"] .markdown-body code {
+  background: rgba(15, 23, 42, 0.06);
+  color: #0f172a;
+}
+html[data-app-mode="light"] .markdown-body pre {
+  background: rgba(15, 23, 42, 0.05);
+  color: #0f172a;
+}
+html[data-app-mode="light"] .markdown-body pre code { color: #0f172a; }
+
+/* Tailwind utility overrides. Scoping with `html[data-app-mode="light"]`
+   gives these rules higher specificity than the base utilities, so no
+   `!important` sprawl is needed on non-color properties. Exception: a few
+   Tailwind arbitrary values use higher specificity via `\[` escaping, so we
+   add !important on those to win. */
+html[data-app-mode="light"] .text-slate-100 { color: #0f172a; }
+html[data-app-mode="light"] .text-slate-200 { color: #1e293b; }
+html[data-app-mode="light"] .text-slate-300 { color: #334155; }
+html[data-app-mode="light"] .text-slate-400 { color: #475569; }
+html[data-app-mode="light"] .text-slate-500 { color: #64748b; }
+html[data-app-mode="light"] .text-slate-600 { color: #94a3b8; }
+html[data-app-mode="light"] .text-white { color: #0f172a; }
+
+html[data-app-mode="light"] .bg-white\/5 { background-color: rgba(15, 23, 42, 0.04) !important; }
+html[data-app-mode="light"] .bg-white\/10 { background-color: rgba(15, 23, 42, 0.08) !important; }
+html[data-app-mode="light"] .bg-white\/\[0\.02\] { background-color: rgba(15, 23, 42, 0.02) !important; }
+html[data-app-mode="light"] .bg-white\/\[0\.03\] { background-color: rgba(15, 23, 42, 0.03) !important; }
+html[data-app-mode="light"] .bg-white\/\[0\.04\] { background-color: rgba(15, 23, 42, 0.04) !important; }
+html[data-app-mode="light"] .bg-white\/\[0\.08\] { background-color: rgba(15, 23, 42, 0.08) !important; }
+
+html[data-app-mode="light"] .hover\:bg-white\/5:hover { background-color: rgba(15, 23, 42, 0.05) !important; }
+html[data-app-mode="light"] .hover\:bg-white\/\[0\.08\]:hover { background-color: rgba(15, 23, 42, 0.08) !important; }
+
+html[data-app-mode="light"] .border-white\/5 { border-color: rgba(15, 23, 42, 0.08) !important; }
+html[data-app-mode="light"] .border-white\/10 { border-color: rgba(15, 23, 42, 0.12) !important; }
+
+html[data-app-mode="light"] .placeholder\:text-slate-500::placeholder { color: #94a3b8; }
+
+/* TopBar has a hardcoded dark rgba(). Override when in light mode. */
+html[data-app-mode="light"] .bg-\[rgba\(8\,8\,13\,0\.6\)\] {
+  background-color: rgba(255, 255, 255, 0.85) !important;
+  border-color: rgba(15, 23, 42, 0.08) !important;
+}
+
+/* Scrollbars: darken the thumb for contrast on white. */
+html[data-app-mode="light"] * {
+  scrollbar-color: rgba(15, 23, 42, 0.18) transparent;
+}
+html[data-app-mode="light"] *::-webkit-scrollbar-thumb {
+  background: rgba(15, 23, 42, 0.18);
+}
+html[data-app-mode="light"] *::-webkit-scrollbar-thumb:hover {
+  background: rgba(15, 23, 42, 0.32);
+}
+
 /* ---------- Markdown styling for assistant chat bubbles ---------- */
 .markdown-body p { margin: 0 0 0.55em; }
 .markdown-body p:last-child { margin-bottom: 0; }

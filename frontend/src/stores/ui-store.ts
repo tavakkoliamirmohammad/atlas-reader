@@ -7,6 +7,7 @@ import type {
 export type { Backend, CodexModel, DigestRange, ModelChoice };
 
 export type ReadingMode = "light" | "sepia" | "dark";
+export type AppMode = "dark" | "light";
 
 export type CustomPalette = { c1: string; c2: string; ink: string };
 
@@ -18,6 +19,7 @@ type UiState = {
   leftCollapsed: boolean;
   rightCollapsed: boolean;
   readingMode: ReadingMode;
+  appMode: AppMode;
   model: ModelChoice;
   codexModel: CodexModel;
   backend: Backend;
@@ -26,6 +28,8 @@ type UiState = {
   setDigestRange: (r: DigestRange) => void;
   setBackend: (b: Backend) => void;
   setCodexModel: (m: CodexModel) => void;
+  setAppMode: (m: AppMode) => void;
+  toggleAppMode: () => void;
   // Ephemeral action dispatchers — NOT persisted. The action-id counters let
   // subscribers fire on each increment via a `useEffect(..., [id])`.
   summarizeRequestId: number;
@@ -55,6 +59,7 @@ export const useUiStore = create<UiState>()(
       leftCollapsed: false,
       rightCollapsed: false,
       readingMode: "light",
+      appMode: "dark",
       model: "sonnet",
       codexModel: "gpt-5.4",
       backend: "codex",
@@ -63,6 +68,9 @@ export const useUiStore = create<UiState>()(
       setDigestRange: (r) => set({ digestRange: r }),
       setBackend: (b) => set({ backend: b }),
       setCodexModel: (m) => set({ codexModel: m }),
+      setAppMode: (m) => set({ appMode: m }),
+      toggleAppMode: () =>
+        set((s) => ({ appMode: s.appMode === "dark" ? "light" : "dark" })),
       summarizeRequestId: 0,
       askRequest: null,
       pinnedQuote: null,
@@ -97,6 +105,7 @@ export const useUiStore = create<UiState>()(
         leftCollapsed: s.leftCollapsed,
         rightCollapsed: s.rightCollapsed,
         readingMode: s.readingMode,
+        appMode: s.appMode,
         model: s.model,
         codexModel: s.codexModel,
         backend: s.backend,

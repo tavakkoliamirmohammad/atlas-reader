@@ -22,11 +22,18 @@ export default function App() {
   const leftCollapsed = useUiStore((s) => s.leftCollapsed);
   const rightCollapsed = useUiStore((s) => s.rightCollapsed);
   const paletteId = useUiStore((s) => s.paletteId);
+  const appMode = useUiStore((s) => s.appMode);
 
   useEffect(() => {
     const p = getPaletteById(paletteId);
     if (p) applyPalette(p);
   }, [paletteId]);
+
+  // Sync app mode → <html data-app-mode> so CSS overrides in globals.css
+  // can switch the whole chrome between dark and light.
+  useEffect(() => {
+    document.documentElement.dataset.appMode = appMode;
+  }, [appMode]);
 
   useEffect(() => {
     installKeyboard();
