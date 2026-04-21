@@ -675,19 +675,20 @@ export function PdfViewport({
 
         {/* Error overlay. */}
         {error && (
-          <div className="absolute inset-0 flex items-center justify-center px-6">
+          <div className="absolute inset-0 flex items-center justify-center px-6 pointer-events-none">
             <div
-              className="max-w-md text-center text-[13px] text-slate-300 px-4 py-3 rounded-lg"
+              className="max-w-md text-center text-[13px] px-4 py-3 rounded-lg"
               style={{
-                background: "rgba(12,14,20,0.75)",
-                border: "1px solid rgba(255,255,255,0.08)",
+                background: "var(--surface-overlay)",
+                border: "1px solid var(--surface-overlay-border)",
+                color: "var(--surface-overlay-text)",
               }}
             >
               <div className="font-semibold mb-1">Couldn’t load PDF</div>
-              <div className="text-slate-400 text-[11px] break-all">
+              <div className="text-[11px] break-all" style={{ opacity: 0.7 }}>
                 {fileUrl}
               </div>
-              <div className="text-slate-500 text-[11px] mt-1">{error}</div>
+              <div className="text-[11px] mt-1" style={{ opacity: 0.55 }}>{error}</div>
             </div>
           </div>
         )}
@@ -736,18 +737,22 @@ function LoadingCard({ phase }: { phase: LoadPhase }) {
   const pct = Math.round(ratio * 100);
 
   return (
-    <div className="absolute inset-0 flex items-center justify-center pointer-events-none px-6">
+    <div
+      className="absolute inset-x-0 bottom-0 flex justify-center pointer-events-none px-6 pb-6 fade-up-bottom"
+      aria-live="polite"
+    >
       <div
-        className="w-full max-w-[320px] rounded-xl px-4 py-3.5"
+        className="w-full max-w-[360px] rounded-xl px-4 py-3"
         style={{
-          background: "rgba(12,14,20,0.78)",
-          border: "1px solid rgba(255,255,255,0.08)",
+          background: "var(--surface-overlay)",
+          border: "1px solid var(--surface-overlay-border)",
+          color: "var(--surface-overlay-text)",
           backdropFilter: "blur(10px)",
           boxShadow:
-            "0 10px 30px -12px rgba(0,0,0,0.55), 0 0 0 1px var(--ac1-mid)",
+            "0 10px 30px -12px rgba(0,0,0,0.25), 0 0 0 1px var(--ac1-mid)",
         }}
       >
-        <div className="flex items-center gap-2 text-[13px] font-medium text-slate-100">
+        <div className="flex items-center gap-2 text-[13px] font-medium">
           <Loader2 size={14} className="animate-spin" style={{ color: "var(--ac1)" }} />
           <span className="flex-1">{title}</span>
           {!indeterminate && (
@@ -762,7 +767,7 @@ function LoadingCard({ phase }: { phase: LoadPhase }) {
 
         <div
           className="mt-2.5 h-1.5 w-full overflow-hidden rounded-full"
-          style={{ background: "rgba(255,255,255,0.06)" }}
+          style={{ background: "var(--surface-overlay-border)" }}
         >
           {indeterminate ? (
             <div
@@ -787,7 +792,10 @@ function LoadingCard({ phase }: { phase: LoadPhase }) {
         </div>
 
         {detail && (
-          <div className="mt-1.5 font-mono text-[10.5px] text-slate-400 tabular-nums">
+          <div
+            className="mt-1.5 font-mono text-[10.5px] tabular-nums"
+            style={{ color: "var(--surface-overlay-muted)" }}
+          >
             {detail}
           </div>
         )}

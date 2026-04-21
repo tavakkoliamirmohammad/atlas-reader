@@ -84,6 +84,15 @@ body { background: #08080d; color: #e5e7ef; font-family: Inter, system-ui, sans-
   display: flex; flex-direction: column;
 }
 
+/* Loading / toast card that slides up from the bottom edge. */
+@keyframes atlas-fade-up-bottom {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.fade-up-bottom {
+  animation: atlas-fade-up-bottom .24s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
 /* ---------- Light app mode ----------
    An opt-in override layer. `html[data-app-mode="light"]` re-skins the chrome
    without rewriting component styles: backgrounds go white, white/X
@@ -144,10 +153,33 @@ html[data-app-mode="light"] .border-white\/10 { border-color: rgba(15, 23, 42, 0
 
 html[data-app-mode="light"] .placeholder\:text-slate-500::placeholder { color: #94a3b8; }
 
-/* TopBar has a hardcoded dark rgba(). Override when in light mode. */
+/* zinc-* text + bg utilities used by the modal/overlay components
+   (ShortcutsOverlay, CommandPalette, SearchPalette, BuildProgressOverlay,
+   Footer). Treat zinc as slate here — the hues are close enough that a
+   unified light-mode palette reads clean. */
+html[data-app-mode="light"] .text-zinc-100 { color: #0f172a; }
+html[data-app-mode="light"] .text-zinc-200 { color: #1e293b; }
+html[data-app-mode="light"] .text-zinc-300 { color: #334155; }
+html[data-app-mode="light"] .text-zinc-400 { color: #475569; }
+html[data-app-mode="light"] .text-zinc-500 { color: #64748b; }
+html[data-app-mode="light"] .bg-zinc-800 { background-color: rgba(15, 23, 42, 0.08) !important; }
+html[data-app-mode="light"] .bg-zinc-900\/70 { background-color: rgba(255, 255, 255, 0.92) !important; }
+html[data-app-mode="light"] .bg-zinc-900\/90 { background-color: rgba(255, 255, 255, 0.96) !important; }
+html[data-app-mode="light"] .bg-zinc-900\/95 { background-color: rgba(255, 255, 255, 0.98) !important; }
+
+/* Scrim / translucent-black utilities. In light mode the scrim still
+   darkens the canvas slightly but not to near-black. */
+html[data-app-mode="light"] .bg-black\/30 { background-color: rgba(15, 23, 42, 0.05) !important; }
+html[data-app-mode="light"] .bg-black\/60 { background-color: rgba(15, 23, 42, 0.28) !important; }
+html[data-app-mode="light"] .bg-black\/80 { background-color: rgba(15, 23, 42, 0.40) !important; }
+
+/* Hardcoded rgbas used by specific chrome. Override each. */
 html[data-app-mode="light"] .bg-\[rgba\(8\,8\,13\,0\.6\)\] {
   background-color: rgba(255, 255, 255, 0.85) !important;
   border-color: rgba(15, 23, 42, 0.08) !important;
+}
+html[data-app-mode="light"] .bg-\[rgba\(18\,18\,28\,0\.85\)\] {
+  background-color: rgba(255, 255, 255, 0.90) !important;
 }
 
 /* Scrollbars: darken the thumb for contrast on white. */
