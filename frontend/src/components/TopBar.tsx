@@ -19,31 +19,56 @@ export function TopBar() {
 
   return (
     <div className="topbar-glass relative z-10 flex items-center gap-3 px-4 h-[52px]">
-      {/* Brand — icon + wordmark share a single flex row so items-center
-          does the optical centering; no translate-y hacks. Font is set to a
-          line-height that matches the tile so the text box doesn't add
-          phantom top/bottom padding. */}
+      {/* Brand — gradient-stroked compass rose on a dark glass tile, paired
+          with a Fraunces display serif wordmark. The serif reads as an
+          "intellectual" / literary cue that matches the paper-reader
+          product; gradient text fill keeps the brand palette consistent
+          without painting the tile too loudly. */}
       <a
         href="/"
         aria-label="Atlas — home"
-        className="inline-flex items-center gap-2 shrink-0 group h-7"
+        className="inline-flex items-baseline gap-2.5 shrink-0 group h-7"
       >
         <span
           aria-hidden
-          className="inline-flex items-center justify-center w-7 h-7 rounded-[9px] overflow-hidden transition-transform group-hover:scale-[1.04]"
+          className="relative inline-flex items-center justify-center w-7 h-7 rounded-[8px] self-center transition-transform duration-200 group-hover:scale-[1.06] group-hover:rotate-[6deg]"
           style={{
-            background: "var(--user-grad)",
-            boxShadow: "0 3px 10px -3px var(--ac1-mid), inset 0 0 0 1px rgba(255,255,255,0.08)",
+            background: "rgba(10, 14, 24, 0.55)",
+            boxShadow:
+              "inset 0 0 0 1px var(--ac1-mid), 0 4px 14px -6px var(--ac1-mid), inset 0 1px 0 rgba(255,255,255,0.08)",
           }}
         >
-          <svg viewBox="0 0 24 24" className="w-[15px] h-[15px] block" fill="var(--user-ink)">
-            <path d="M12 3 L13.1 9.9 L20 11 L13.1 12.1 L12 21 L10.9 12.1 L4 11 L10.9 9.9 Z" />
-            <circle cx="12" cy="11" r="1.25" fill="var(--ac1)" />
+          <svg
+            viewBox="0 0 24 24"
+            className="w-4 h-4 block"
+            fill="none"
+            stroke="url(#atlas-brand-g)"
+            strokeWidth="1.4"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <defs>
+              <linearGradient id="atlas-brand-g" x1="2" y1="2" x2="22" y2="22" gradientUnits="userSpaceOnUse">
+                <stop offset="0%" stopColor="var(--ac1)" />
+                <stop offset="100%" stopColor="var(--ac2)" />
+              </linearGradient>
+            </defs>
+            {/* Diamond compass body with faint fill for volume */}
+            <path d="M12 3 L14.8 12 L12 21 L9.2 12 Z" fill="url(#atlas-brand-g)" fillOpacity="0.14" />
+            {/* Cardinal cross */}
+            <path d="M12 3 V21 M3 12 H21" />
+            {/* Center bead */}
+            <circle cx="12" cy="12" r="1.3" fill="var(--ac1)" stroke="none" />
           </svg>
         </span>
         <span
-          className="text-[15px] font-semibold tracking-tight text-slate-100"
-          style={{ lineHeight: "28px" }}
+          className="brand-wordmark"
+          style={{
+            background: "var(--user-grad)",
+            WebkitBackgroundClip: "text",
+            backgroundClip: "text",
+            color: "transparent",
+          }}
         >
           Atlas
         </span>

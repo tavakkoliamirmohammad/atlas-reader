@@ -82,6 +82,22 @@ html[data-app-mode="light"] {
 html, body, #root { height: 100%; overflow: hidden; }
 body { background: #08080d; color: #e5e7ef; font-family: Inter, system-ui, sans-serif; }
 
+/* Brand wordmark — Fraunces is a variable contemporary serif with an
+   `opsz` (optical size) axis. Pinning opsz to 144 gives us the display
+   cut (high contrast, sharper terminals) instead of the text cut that
+   gets served by default at smaller point sizes. SOFT 50 softens the
+   corners just enough to feel modern without going cartoonish. */
+.brand-wordmark {
+  font-family: "Fraunces", ui-serif, Georgia, "Times New Roman", serif;
+  font-variation-settings: "opsz" 144, "SOFT" 50;
+  font-weight: 500;
+  font-size: 20px;
+  line-height: 28px;
+  letter-spacing: -0.015em;
+  /* Italicized small-caps-ish flourish on the first letter via font-feature-settings. */
+  font-feature-settings: "ss01" on, "liga" on;
+}
+
 /* Drop the default chromium-blue focus box on interactive controls — it's
    a bright rectangle that clashes with the glass aesthetic. Keyboard users
    still get an a11y-visible ring via :focus-visible, tinted in the accent
