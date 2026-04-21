@@ -44,9 +44,9 @@
                            0 8px 24px -8px rgba(0, 0, 0, 0.45);
   --glass-glow-accent:  0 0 0 1px var(--ac1-soft),
                         0 8px 32px -12px var(--ac1-mid);
-  --glass-blur:         44px;
-  --glass-blur-sm:      18px;
-  --glass-blur-lg:      60px;
+  --glass-blur:         56px;
+  --glass-blur-sm:      22px;
+  --glass-blur-lg:      72px;
   --glass-saturate:     150%;
 }
 
@@ -75,7 +75,7 @@ html[data-app-mode="light"] {
                            0 4px 14px -4px rgba(15, 23, 42, 0.12);
   --glass-glow-accent:  0 0 0 1px var(--ac1-mid),
                         0 6px 24px -8px rgba(34, 211, 238, 0.28);
-  --glass-blur:         44px;
+  --glass-blur:         56px;
   --glass-saturate:     150%;
 }
 
@@ -203,6 +203,7 @@ html[data-app-mode="light"] .stage-shell::before {
 }
 .glass-subtle {
   background: var(--glass-bg-subtle);
+  backdrop-filter: blur(var(--glass-blur-sm)) saturate(var(--glass-saturate));
   box-shadow: inset 0 1px 0 var(--glass-rim);
 }
 /* Light mode: the strong white rim-light (--glass-rim: rgba(255,255,255,0.95))

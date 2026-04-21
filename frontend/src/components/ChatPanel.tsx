@@ -290,7 +290,7 @@ export function ChatPanel() {
   return (
     <div className="flex flex-col h-full">
       <Glossary arxivId={arxivId} />
-      <div className="px-3 py-2.5 border-b border-white/5">
+      <div className="px-3 py-2.5">
         <div className="flex items-center justify-between mb-1.5">
           <div className="text-[10px] uppercase tracking-wider text-slate-500">
             Quick actions
@@ -318,12 +318,14 @@ export function ChatPanel() {
         />
       </div>
       <div
-        className="flex-1 overflow-y-auto px-3 py-3 flex flex-col gap-2"
+        className="flex-1 overflow-y-auto px-3 flex flex-col gap-2"
         style={{
           WebkitMaskImage:
-            "linear-gradient(to bottom, transparent 0, black 20px, black calc(100% - 12px), transparent 100%)",
+            "linear-gradient(to bottom, transparent 0, black 40px, black calc(100% - 24px), transparent 100%)",
           maskImage:
-            "linear-gradient(to bottom, transparent 0, black 20px, black calc(100% - 12px), transparent 100%)",
+            "linear-gradient(to bottom, transparent 0, black 40px, black calc(100% - 24px), transparent 100%)",
+          paddingTop: 40,
+          paddingBottom: 24,
         }}
       >
         {messages.length === 0 && !streaming && (
