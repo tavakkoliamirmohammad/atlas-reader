@@ -333,11 +333,13 @@ export function PdfPage({
         }}
       >
         <div
-          className="flex items-center gap-2 rounded-full border border-white/10 px-2 py-1 backdrop-blur-md"
+          className="flex items-center gap-2 rounded-full px-2 py-1 backdrop-blur-md"
           style={{
-            background: "rgba(12,14,20,0.65)",
+            background: "var(--surface-overlay)",
+            border: "1px solid var(--surface-overlay-border)",
+            color: "var(--surface-overlay-text)",
             boxShadow:
-              "0 8px 24px -10px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.04)",
+              "0 8px 24px -10px rgba(0,0,0,0.35), 0 0 0 1px var(--surface-overlay-border)",
           }}
         >
           {arxivId ? <ArxivPill arxivId={arxivId} /> : null}
