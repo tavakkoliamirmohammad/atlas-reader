@@ -13,39 +13,39 @@ async def test_summarize_yields_chunks(atlas_data_dir):
     db.init()
     papers.upsert([SAMPLE])
 
-    async def _fake(args, stdin_text=None):
+    async def _fake(**kwargs):
         yield "## 1. Background\n"
         yield "blah\n"
         yield "## 2. Problem\n"
 
     with patch("app.summarizer.pdf_cache.ensure_cached", new=AsyncMock()):
-        with patch("app.summarizer.claude_subprocess.run_streaming", _fake):
+        with patch("app.summarizer.ai_backend.run_ai", _fake):
             chunks = [c async for c in summarizer.summarize("9")]
 
     assert chunks == ["## 1. Background\n", "blah\n", "## 2. Problem\n"]
 
 
 @pytest.mark.asyncio
-async def test_summarize_uses_opus_with_max_effort(atlas_data_dir):
+async def test_summarize_uses_summarize_task(atlas_data_dir):
     db.init()
     papers.upsert([SAMPLE])
-    captured = {}
+    captured: dict = {}
 
-    async def _capture(args, stdin_text=None):
-        captured["args"] = list(args)
-        captured["stdin"] = stdin_text
+    async def _capture(**kwargs):
+        captured.update(kwargs)
         yield ""
 
     with patch("app.summarizer.pdf_cache.ensure_cached",
                new=AsyncMock(return_value="/tmp/9.pdf")):
-        with patch("app.summarizer.claude_subprocess.run_streaming", _capture):
+        with patch("app.summarizer.ai_backend.run_ai", _capture):
             async for _ in summarizer.summarize("9"):
                 pass
 
-    assert "--model" in captured["args"] and "opus" in captured["args"]
-    assert "--effort" in captured["args"] and "max" in captured["args"]
-    assert "/tmp/9.pdf" in captured["stdin"]
-    assert "## 1. Background" in captured["stdin"]
+    assert captured["task"] == "summarize"
+    assert captured["directive"] == "Produce the deep summary."
+    assert captured["enable_read_file"] == "/tmp/9.pdf"
+    assert "/tmp/9.pdf" in captured["prompt"]
+    assert "## 1. Background" in captured["prompt"]
 
 
 @pytest.mark.asyncio
@@ -60,36 +60,34 @@ async def test_summarize_404s_for_unknown_paper(atlas_data_dir):
 async def test_summarize_passes_model_arg(atlas_data_dir):
     db.init()
     papers.upsert([SAMPLE])
-    captured = {}
+    captured: dict = {}
 
-    async def _capture(args, stdin_text=None):
-        captured["args"] = list(args)
+    async def _capture(**kwargs):
+        captured.update(kwargs)
         yield ""
 
     with patch("app.summarizer.pdf_cache.ensure_cached", new=AsyncMock(return_value="/tmp/9.pdf")):
-        with patch("app.summarizer.claude_subprocess.run_streaming", _capture):
-            async for _ in summarizer.summarize("9", model="haiku"):
+        with patch("app.summarizer.ai_backend.run_ai", _capture):
+            async for _ in summarizer.summarize("9", backend="claude", model="haiku"):
                 pass
 
-    assert "haiku" in captured["args"]
-    # cheaper models should not pass --effort
-    assert "--effort" not in captured["args"]
+    assert captured["backend"] == "claude"
+    assert captured["model"] == "haiku"
 
 
 @pytest.mark.asyncio
-async def test_summarize_sonnet_drops_effort_flag(atlas_data_dir):
+async def test_summarize_defaults_to_codex_backend(atlas_data_dir):
     db.init()
     papers.upsert([SAMPLE])
-    captured = {}
+    captured: dict = {}
 
-    async def _capture(args, stdin_text=None):
-        captured["args"] = list(args)
+    async def _capture(**kwargs):
+        captured.update(kwargs)
         yield ""
 
     with patch("app.summarizer.pdf_cache.ensure_cached", new=AsyncMock(return_value="/tmp/9.pdf")):
-        with patch("app.summarizer.claude_subprocess.run_streaming", _capture):
-            async for _ in summarizer.summarize("9", model="sonnet"):
+        with patch("app.summarizer.ai_backend.run_ai", _capture):
+            async for _ in summarizer.summarize("9"):
                 pass
 
-    assert "sonnet" in captured["args"]
-    assert "--effort" not in captured["args"]
+    assert captured["backend"] == "codex"

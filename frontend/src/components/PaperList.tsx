@@ -63,6 +63,7 @@ export function PaperList() {
   const [loading, setLoading] = useState(true);
   const [activeIndex, setActiveIndex] = useState(0);
   const [rangeCounts, setRangeCounts] = useState<RangeCounts | null>(null);
+  const [filter, setFilter] = useState("");
   const navigate = useNavigate();
   const listRef = useRef<HTMLDivElement | null>(null);
   const pickerRef = useRef<HTMLDivElement | null>(null);
@@ -70,6 +71,10 @@ export function PaperList() {
   const [ink, setInk] = useState<{ left: number; width: number } | null>(null);
   const digestRange = useUiStore((s) => s.digestRange);
   const setDigestRange = useUiStore((s) => s.setDigestRange);
+
+  // Reset filter when the user switches range so "no results" in 3d doesn't
+  // silently hide all 30d papers too.
+  useEffect(() => { setFilter(""); }, [digestRange]);
 
   useEffect(() => {
     let cancelled = false;
@@ -144,9 +149,22 @@ export function PaperList() {
     setDigestRange(RANGE_OPTIONS[next].value);
   }
 
-  const hasTiers = papers.some((p) => p.ai_tier != null);
-  const tierGroups = hasTiers ? groupByTier(papers) : null;
-  const dayGroups = hasTiers ? null : groupPapersByDay(papers);
+  // Apply the in-range text filter client-side. Matches title, authors, or
+  // abstract (case-insensitive substring). Empty filter = no-op.
+  const filteredPapers = useMemo(() => {
+    const q = filter.trim().toLowerCase();
+    if (!q) return papers;
+    return papers.filter(
+      (p) =>
+        p.title.toLowerCase().includes(q) ||
+        p.authors.toLowerCase().includes(q) ||
+        p.abstract.toLowerCase().includes(q),
+    );
+  }, [papers, filter]);
+
+  const hasTiers = filteredPapers.some((p) => p.ai_tier != null);
+  const tierGroups = hasTiers ? groupByTier(filteredPapers) : null;
+  const dayGroups = hasTiers ? null : groupPapersByDay(filteredPapers);
 
   // Flattened row order so arrow-key nav can walk the visible list regardless
   // of whether we're rendering tier groups or day groups. The visual grouping
@@ -213,6 +231,26 @@ export function PaperList() {
         </div>
       </div>
       <UrlBar onSubmit={(id) => navigate(`/reader/${id}`)} />
+      <div className="px-2 pb-2 relative">
+        <input
+          type="search"
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+          placeholder="Filter in range…"
+          aria-label="Filter papers in current range"
+          className="w-full text-[12px] px-2.5 py-1.5 rounded-lg bg-white/[0.03] border border-white/5 placeholder:text-slate-500 text-slate-100 focus:outline-none focus:border-[color:var(--ac1-mid)] transition-colors"
+        />
+        {filter && (
+          <button
+            type="button"
+            aria-label="Clear filter"
+            onClick={() => setFilter("")}
+            className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-200 text-[14px] cursor-pointer"
+          >
+            ×
+          </button>
+        )}
+      </div>
       <div
         ref={pickerRef}
         role="tablist"
@@ -301,6 +339,16 @@ export function PaperList() {
               {digestRange === "all"
                 ? "The archive is empty. Run a daily build from the backend."
                 : `No arXiv papers published in the last ${digestRange} days. Try a wider range.`}
+            </div>
+          </div>
+        )}
+        {!loading && papers.length > 0 && filteredPapers.length === 0 && (
+          <div className="flex flex-col items-center justify-center gap-2 py-16 px-6 text-center">
+            <div className="text-[13px] text-slate-300 font-medium">
+              No matches for "{filter}"
+            </div>
+            <div className="text-[11px] text-slate-500">
+              {papers.length} paper{papers.length === 1 ? "" : "s"} in this range didn't match.
             </div>
           </div>
         )}

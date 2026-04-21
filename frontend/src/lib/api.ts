@@ -13,7 +13,14 @@ export type Paper = {
   read_state: "unread" | "reading" | "read";
 };
 
-export type HealthResponse = { ai: boolean; papers_today: number };
+export type Backend = "claude" | "codex";
+
+export type HealthResponse = {
+  ai: boolean;
+  backends?: { claude: boolean; codex: boolean };
+  default_backend?: Backend;
+  papers_today: number;
+};
 export type DigestResponse = { count: number; papers: Paper[] };
 
 // Defined here (not imported from the ui-store) to avoid a circular import:
@@ -28,10 +35,11 @@ async function getJson<T>(path: string): Promise<T> {
 
 export const api = {
   health:  () => getJson<HealthResponse>("/api/health"),
-  digest:  (build = false, days: DigestRange = 7) => {
+  digest:  (build = false, days: DigestRange = 7, backend?: Backend) => {
     const params = new URLSearchParams();
     if (build) params.set("build", "true");
     params.set("days", String(days));
+    if (backend) params.set("backend", backend);
     const qs = params.toString();
     return getJson<DigestResponse>(`/api/digest${qs ? `?${qs}` : ""}`);
   },
@@ -41,21 +49,45 @@ export const api = {
 
 export type ModelChoice = "opus" | "sonnet" | "haiku";
 
+// Codex models mirror backend/app/ai_argv.CODEX_MODELS. Keep in sync with what
+// `codex --help` / "Select Model" actually lists in codex-cli.
+export type CodexModel =
+  | "gpt-5.4"
+  | "gpt-5.4-mini"
+  | "gpt-5.3-codex"
+  | "gpt-5.2"
+  | "gpt-5.2-codex"
+  | "gpt-5.1-codex-max"
+  | "gpt-5.1-codex-mini";
+
+export const CODEX_MODEL_OPTIONS: CodexModel[] = [
+  "gpt-5.4",
+  "gpt-5.4-mini",
+  "gpt-5.3-codex",
+  "gpt-5.2",
+  "gpt-5.2-codex",
+  "gpt-5.1-codex-max",
+  "gpt-5.1-codex-mini",
+];
+
+// Single type used by UI state when it needs to reference either backend's
+// model identifier. Each backend has its own picker that narrows to its type.
+export type AnyModel = ModelChoice | CodexModel;
+
 export type ChatMessage = {
   role: "user" | "assistant" | "system";
   content: string;
-  model?: ModelChoice;
+  model?: AnyModel;
 };
 
 export async function streamSummary(
   arxivId: string,
   handlers: SSEHandlers,
   signal?: AbortSignal,
-  model?: ModelChoice,
+  model?: AnyModel,
+  backend?: Backend,
 ): Promise<void> {
-  const url = model
-    ? `/api/summarize/${arxivId}?model=${model}`
-    : `/api/summarize/${arxivId}`;
+  const url = _withQuery(`/api/summarize/${arxivId}`, { model, backend });
   return streamSSE(url, { method: "POST" }, handlers, signal);
 }
 
@@ -73,9 +105,10 @@ export async function streamAsk(
   history: ChatMessage[],
   handlers: SSEHandlers,
   signal?: AbortSignal,
-  model?: ModelChoice,
+  model?: AnyModel,
+  backend?: Backend,
 ): Promise<void> {
-  const url = _withQuery(`/api/ask/${arxivId}`, { model });
+  const url = _withQuery(`/api/ask/${arxivId}`, { model, backend });
   return streamSSE(
     url,
     {

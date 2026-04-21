@@ -1,4 +1,12 @@
-"""`atlas` CLI: start, stop, status, logs, open, up, restart."""
+"""`atlas` CLI: start, stop, status, logs, open, up, restart, doctor.
+
+`atlas start` brings up two processes:
+  1. the backend (uvicorn on 8765)
+  2. the AI runner (uvicorn on 8766) — a host-only daemon that spawns claude
+     / codex subprocesses, so Docker instances of Atlas can reach host creds.
+
+Both run under this CLI's lifecycle; their PIDs are tracked in ~/.atlas/.
+"""
 
 from __future__ import annotations
 
@@ -14,10 +22,11 @@ import webbrowser
 from pathlib import Path
 from typing import Optional, Sequence
 
-from app import db, launchd
+from app import db, launchd, secret_store
 
 
 PORT = 8765
+RUNNER_PORT = 8766
 
 
 def _project_root() -> Path:
@@ -55,20 +64,28 @@ def _build_frontend() -> int:
     return res.returncode
 
 
-def _pid_file() -> Path:
+# ---------- pid + log file helpers ----------
+def _backend_pid_file() -> Path:
     return db.data_dir() / "atlas.pid"
 
 
-def _log_file() -> Path:
+def _runner_pid_file() -> Path:
+    return db.data_dir() / "atlas-runner.pid"
+
+
+def _backend_log() -> Path:
     return db.data_dir() / "atlas.log"
 
 
-def _read_pid() -> Optional[int]:
-    p = _pid_file()
-    if not p.exists():
+def _runner_log() -> Path:
+    return db.data_dir() / "atlas-runner.log"
+
+
+def _read_pid(path: Path) -> Optional[int]:
+    if not path.exists():
         return None
     try:
-        return int(p.read_text().strip())
+        return int(path.read_text().strip())
     except ValueError:
         return None
 
@@ -81,49 +98,96 @@ def _is_alive(pid: int) -> bool:
         return False
 
 
+# ---------- runner lifecycle ----------
+def _start_runner() -> None:
+    """Start the AI runner if not already running. Writes PID to disk."""
+    if (pid := _read_pid(_runner_pid_file())) and _is_alive(pid):
+        print(f"runner already running (pid {pid}) on http://127.0.0.1:{RUNNER_PORT}")
+        return
+    # Generate + persist secret if this is the first run.
+    secret_store.ensure()
+    log_fp = _runner_log().open("ab")
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "app.runner_main"],
+        stdout=log_fp, stderr=log_fp,
+        start_new_session=True,
+    )
+    _runner_pid_file().write_text(str(proc.pid))
+    print(f"runner started (pid {proc.pid}) on http://127.0.0.1:{RUNNER_PORT}")
+
+
+def _stop_runner() -> None:
+    pid = _read_pid(_runner_pid_file())
+    if pid is None:
+        return
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+    _runner_pid_file().unlink(missing_ok=True)
+    print(f"runner stopped (pid {pid})")
+
+
+# ---------- top-level commands ----------
 def cmd_start() -> int:
-    if (pid := _read_pid()) and _is_alive(pid):
-        print(f"already running (pid {pid})")
+    _start_runner()
+    if (pid := _read_pid(_backend_pid_file())) and _is_alive(pid):
+        print(f"backend already running (pid {pid})")
         return 0
-    log = _log_file().open("ab")
+    log = _backend_log().open("ab")
     proc = subprocess.Popen(
         [sys.executable, "-m", "uvicorn", "app.main:app",
          "--host", "127.0.0.1", "--port", str(PORT)],
         stdout=log, stderr=log,
         start_new_session=True,
     )
-    _pid_file().write_text(str(proc.pid))
+    _backend_pid_file().write_text(str(proc.pid))
     print(f"started (pid {proc.pid}) on http://localhost:{PORT}")
     return 0
 
 
 def cmd_stop() -> int:
-    pid = _read_pid()
-    if pid is None:
-        print("not running")
-        return 0
-    try:
-        os.kill(pid, signal.SIGTERM)
-    except ProcessLookupError:
-        pass
-    _pid_file().unlink(missing_ok=True)
-    print(f"stopped (pid {pid})")
+    pid = _read_pid(_backend_pid_file())
+    if pid is not None:
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        _backend_pid_file().unlink(missing_ok=True)
+        print(f"stopped (pid {pid})")
+    else:
+        print("backend not running")
+    _stop_runner()
     return 0
 
 
 def cmd_status() -> int:
-    pid = _read_pid()
-    if pid and _is_alive(pid):
-        print(f"running (pid {pid}) on http://localhost:{PORT}")
+    backend_pid = _read_pid(_backend_pid_file())
+    runner_pid = _read_pid(_runner_pid_file())
+    if backend_pid and _is_alive(backend_pid):
+        print(f"backend: running (pid {backend_pid}) on http://localhost:{PORT}")
     else:
-        print("not running")
+        print("backend: not running")
+    if runner_pid and _is_alive(runner_pid):
+        print(f"runner:  running (pid {runner_pid}) on http://127.0.0.1:{RUNNER_PORT}")
+    else:
+        print("runner:  not running")
     return 0
 
 
 def cmd_logs() -> int:
-    log = _log_file()
+    log = _backend_log()
     if not log.exists():
-        print("no log file yet")
+        print("no backend log yet")
+        return 0
+    sys.stdout.write(log.read_text())
+    return 0
+
+
+def cmd_runner_logs() -> int:
+    log = _runner_log()
+    if not log.exists():
+        print("no runner log yet")
         return 0
     sys.stdout.write(log.read_text())
     return 0
@@ -145,7 +209,7 @@ def cmd_up() -> int:
     rc = _build_frontend()
     if rc != 0:
         return rc
-    if (pid := _read_pid()) and _is_alive(pid):
+    if (pid := _read_pid(_backend_pid_file())) and _is_alive(pid):
         print(f"backend already running (pid {pid}); restarting to pick up changes")
         cmd_stop()
         time.sleep(0.5)
@@ -157,6 +221,27 @@ def cmd_up() -> int:
         print(f"server didn't respond on http://localhost:{PORT} within 10s; check `atlas logs`",
               file=sys.stderr)
         return 1
+    return 0
+
+
+def cmd_doctor() -> int:
+    """Print the live security posture of the runner + backend."""
+    print("=== Atlas doctor ===")
+    secret = secret_store.load()
+    secret_file = db.data_dir() / "runner.secret"
+    env_file = db.data_dir() / "runner.env"
+    print(f"secret file:   {secret_file}  "
+          f"{'present' if secret_file.exists() else 'MISSING'}  "
+          f"mode={oct(secret_file.stat().st_mode & 0o777) if secret_file.exists() else '-'}")
+    print(f"env file:      {env_file}  "
+          f"{'present' if env_file.exists() else 'MISSING'}  "
+          f"mode={oct(env_file.stat().st_mode & 0o777) if env_file.exists() else '-'}")
+    print(f"secret loaded: {'yes' if secret else 'NO'}")
+    runner_pid = _read_pid(_runner_pid_file())
+    print(f"runner:        {'running pid '+str(runner_pid) if runner_pid and _is_alive(runner_pid) else 'not running'}")
+    print(f"runner URL:    http://127.0.0.1:{RUNNER_PORT}  (loopback only)")
+    print("sandbox:       codex → read-only (forced);  claude → Read tool only when needed")
+    print("rate limit:    30 requests/min, concurrency 4, per-task timeout 60–180s")
     return 0
 
 
@@ -173,8 +258,11 @@ def cmd_uninstall_launchd() -> int:
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(prog="atlas")
     sub = parser.add_subparsers(dest="cmd", required=True)
-    for name in ("start", "stop", "status", "logs", "open", "restart", "up",
-                 "install-launchd", "uninstall-launchd"):
+    for name in (
+        "start", "stop", "status", "logs", "runner-logs",
+        "open", "restart", "up", "doctor",
+        "install-launchd", "uninstall-launchd",
+    ):
         sub.add_parser(name)
     args = parser.parse_args(argv)
     return {
@@ -182,9 +270,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         "stop":              cmd_stop,
         "status":            cmd_status,
         "logs":              cmd_logs,
+        "runner-logs":       cmd_runner_logs,
         "open":              cmd_open,
         "restart":           cmd_restart,
         "up":                cmd_up,
+        "doctor":            cmd_doctor,
         "install-launchd":   cmd_install_launchd,
         "uninstall-launchd": cmd_uninstall_launchd,
     }[args.cmd]()

@@ -11,26 +11,23 @@ from app.main import app
 async def test_full_ai_round_trip(atlas_data_dir, fixtures_dir):
     """Build digest with AI tiering, summarize one paper, ask a follow-up.
 
-    Chat is now ephemeral (no DB writes from the asker), so /api/conversations
-    returns an empty list — that's the expected behavior, not a bug.
+    All AI calls now route through `ai_backend.run_ai`; we dispatch fake
+    outputs based on the `task` kwarg (rank/summarize/ask).
+
+    Chat is ephemeral (no DB writes from the asker), so /api/conversations
+    returns an empty list — expected.
     """
     db.init()
 
     pl = [Paper("zz", "MLIR Linalg", "A", "abstract", "cs.PL", "2026-04-19T08:00:00Z")]
 
-    # All three modules share the same `app.claude_subprocess.run_streaming`,
-    # so we route on the model arg to dispatch ranker/summarizer/asker outputs.
-    async def fake_run_streaming(args, stdin_text=None):
-        args_list = list(args)
-        try:
-            model = args_list[args_list.index("--model") + 1]
-        except (ValueError, IndexError):
-            model = ""
-        if model == "haiku":
+    async def fake_run_ai(**kwargs):
+        task = kwargs.get("task")
+        if task == "rank":
             yield '[{"id":"zz","score":5}]'
-        elif model == "opus":
+        elif task == "summarize":
             yield "## 1. Background\nstuff\n"
-        elif model == "sonnet":
+        elif task == "ask":
             yield "answer"
         else:
             yield ""
@@ -38,24 +35,22 @@ async def test_full_ai_round_trip(atlas_data_dir, fixtures_dir):
     with patch("app.digest.arxiv.fetch_recent", new=AsyncMock(side_effect=[pl, []])), \
          patch("app.digest.health.claude_available", return_value=True), \
          patch("app.main.health.claude_available", return_value=True), \
-         patch("app.claude_subprocess.run_streaming", fake_run_streaming), \
+         patch("app.ranker.ai_backend.run_ai", fake_run_ai), \
+         patch("app.summarizer.ai_backend.run_ai", fake_run_ai), \
+         patch("app.asker.ai_backend.run_ai", fake_run_ai), \
          patch("app.summarizer.pdf_cache.ensure_cached", new=AsyncMock(return_value="/tmp/zz.pdf")), \
          patch("app.asker.pdf_cache.ensure_cached", new=AsyncMock(return_value="/tmp/zz.pdf")):
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
-            # Build digest -> ranker runs
             d = await c.get("/api/digest?build=true")
             assert d.json()["count"] == 1
             row = papers.get("zz")
             assert row["ai_tier"] == 5
 
-            # Summarize -> SSE stream (chunks are JSON-encoded into the data field
-            # so paragraph breaks survive SSE framing).
             import json as _json
             s = await c.post("/api/summarize/zz")
             assert f'data: {_json.dumps({"t": "## 1. Background\nstuff\n"})}' in s.text
 
-            # Ask -> SSE stream (ephemeral, no DB write)
             a = await c.post("/api/ask/zz", json={"question": "Why?", "history": []})
             assert f'data: {_json.dumps({"t": "answer"})}' in a.text
 

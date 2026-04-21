@@ -2,23 +2,42 @@ import { useEffect, useRef, useState } from "react";
 import { useMatch } from "react-router-dom";
 import {
   type ChatMessage,
+  CODEX_MODEL_OPTIONS,
   streamAsk,
   streamSummary,
 } from "@/lib/api";
 import { StreamingMessage } from "./StreamingMessage";
 import { QuickActionChips } from "./QuickActionChips";
 import { Glossary } from "./Glossary";
-import { useUiStore, type ModelChoice } from "@/stores/ui-store";
+import { useUiStore, type CodexModel, type ModelChoice } from "@/stores/ui-store";
 
-const MODEL_META: Record<ModelChoice, { label: string; tag: string }> = {
+const CLAUDE_MODEL_META: Record<ModelChoice, { label: string; tag: string }> = {
   opus:   { label: "Opus",   tag: "deepest"  },
   sonnet: { label: "Sonnet", tag: "balanced" },
   haiku:  { label: "Haiku",  tag: "fastest"  },
 };
 
-function ModelPicker({
-  model, onChange, disabled,
-}: { model: ModelChoice; onChange: (m: ModelChoice) => void; disabled?: boolean }) {
+const CODEX_MODEL_META: Record<CodexModel, { label: string; tag: string }> = {
+  "gpt-5.4":            { label: "GPT-5.4",           tag: "current"  },
+  "gpt-5.4-mini":       { label: "GPT-5.4 mini",      tag: "smaller"  },
+  "gpt-5.3-codex":      { label: "GPT-5.3 Codex",     tag: "codex"    },
+  "gpt-5.2":            { label: "GPT-5.2",           tag: "long-run" },
+  "gpt-5.2-codex":      { label: "GPT-5.2 Codex",     tag: "codex"    },
+  "gpt-5.1-codex-max":  { label: "GPT-5.1 Codex Max", tag: "reasoning"},
+  "gpt-5.1-codex-mini": { label: "GPT-5.1 Codex mini",tag: "cheap"    },
+};
+
+type GenericPickerProps<T extends string> = {
+  model: T;
+  options: T[];
+  meta: Record<T, { label: string; tag: string }>;
+  onChange: (m: T) => void;
+  disabled?: boolean;
+};
+
+function GenericModelPicker<T extends string>({
+  model, options, meta, onChange, disabled,
+}: GenericPickerProps<T>) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -41,7 +60,7 @@ function ModelPicker({
         className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-[11px] text-slate-300 bg-white/[0.04] border border-white/5 hover:border-[color:var(--ac1-mid)] hover:text-white transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
       >
         <span className="w-1.5 h-1.5 rounded-full" style={{ background: "var(--ac1)" }} />
-        <span>{MODEL_META[model].label}</span>
+        <span>{meta[model].label}</span>
         <svg width="9" height="9" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
           <path d="M3 4.5l3 3 3-3" />
         </svg>
@@ -51,7 +70,7 @@ function ModelPicker({
           className="absolute bottom-full left-0 mb-1.5 w-44 rounded-xl bg-zinc-900/95 backdrop-blur-md border border-white/10 shadow-2xl overflow-hidden z-30"
           role="listbox"
         >
-          {(["opus", "sonnet", "haiku"] as ModelChoice[]).map((m) => {
+          {options.map((m) => {
             const active = m === model;
             return (
               <button
@@ -72,10 +91,10 @@ function ModelPicker({
                     style={{ background: active ? "var(--ac1)" : "rgb(100 116 139)" }}
                   />
                   <span className={active ? "text-slate-100 font-medium" : "text-slate-300"}>
-                    {MODEL_META[m].label}
+                    {meta[m].label}
                   </span>
                 </span>
-                <span className="text-[10px] text-slate-500">{MODEL_META[m].tag}</span>
+                <span className="text-[10px] text-slate-500">{meta[m].tag}</span>
               </button>
             );
           })}
@@ -100,6 +119,9 @@ export function ChatPanel() {
   const abortRef = useRef<AbortController | null>(null);
   const model = useUiStore((s) => s.model);
   const setModel = useUiStore((s) => s.setModel);
+  const codexModel = useUiStore((s) => s.codexModel);
+  const setCodexModel = useUiStore((s) => s.setCodexModel);
+  const backend = useUiStore((s) => s.backend);
   const summarizeRequestId = useUiStore((s) => s.summarizeRequestId);
   const askRequest = useUiStore((s) => s.askRequest);
   const pinnedQuote = useUiStore((s) => s.pinnedQuote);
@@ -176,10 +198,11 @@ export function ChatPanel() {
     const historyForBackend = messages;
     setDraft("");
     clearPinnedQuote();
+    const activeModel = backend === "claude" ? model : codexModel;
     setMessages((m) => [
       ...m,
       { role: "user", content: question },
-      { role: "assistant", content: "", model },
+      { role: "assistant", content: "", model: activeModel },
     ]);
     setStreaming(true);
     abortRef.current = new AbortController();
@@ -188,7 +211,7 @@ export function ChatPanel() {
         onChunk: appendChunk,
         onDone: () => setStreaming(false),
         onError: (e) => { appendChunk(`\n\n[error: ${e}]`); setStreaming(false); },
-      }, abortRef.current.signal, model);
+      }, abortRef.current.signal, backend === "claude" ? model : codexModel, backend);
     } catch {
       setStreaming(false);
     }
@@ -196,7 +219,8 @@ export function ChatPanel() {
 
   async function summarize() {
     if (!arxivId || streaming) return;
-    setMessages((m) => [...m, { role: "assistant", content: "", model }]);
+    const activeModel = backend === "claude" ? model : codexModel;
+    setMessages((m) => [...m, { role: "assistant", content: "", model: activeModel }]);
     setStreaming(true);
     setSummarizeStartedAt(Date.now());
     abortRef.current = new AbortController();
@@ -205,7 +229,7 @@ export function ChatPanel() {
         onChunk: appendChunk,
         onDone: () => setStreaming(false),
         onError: (e) => { appendChunk(`\n\n[error: ${e}]`); setStreaming(false); },
-      }, abortRef.current.signal, model);
+      }, abortRef.current.signal, backend === "claude" ? model : codexModel, backend);
     } catch (e) {
       setStreaming(false);
     }
@@ -309,7 +333,23 @@ export function ChatPanel() {
             className="bg-transparent border-0 outline-none text-[13px] leading-relaxed text-slate-100 placeholder:text-slate-500 resize-none disabled:opacity-50 min-h-[60px] max-h-[200px]"
           />
           <div className="flex items-center justify-between gap-2">
-            <ModelPicker model={model} onChange={setModel} disabled={streaming} />
+            {backend === "claude" ? (
+              <GenericModelPicker
+                model={model}
+                options={["opus", "sonnet", "haiku"] as ModelChoice[]}
+                meta={CLAUDE_MODEL_META}
+                onChange={setModel}
+                disabled={streaming}
+              />
+            ) : (
+              <GenericModelPicker
+                model={codexModel}
+                options={CODEX_MODEL_OPTIONS}
+                meta={CODEX_MODEL_META}
+                onChange={setCodexModel}
+                disabled={streaming}
+              />
+            )}
             <div className="flex items-center gap-2">
               <span className="text-[10px] text-slate-500 hidden sm:inline">
                 <kbd className="px-1 py-px border border-white/10 rounded font-mono text-[9px]">⌘</kbd>

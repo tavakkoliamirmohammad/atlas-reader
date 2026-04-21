@@ -16,6 +16,8 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from app import (
+    ai_argv,
+    ai_backend,
     arxiv,
     asker,
     conversations,
@@ -32,10 +34,53 @@ from app import (
 )
 
 
+async def _daily_build_loop() -> None:
+    """Once an hour, ensure today's digest has been built.
+
+    Runs in the background from app startup. Skips if today's build row
+    already has status='done', so restarting the backend repeatedly doesn't
+    re-hammer arXiv. Always uses rank=False to keep the check cheap — users
+    who want AI tiering trigger it explicitly from the UI.
+    """
+    import logging
+    from datetime import date
+    log = logging.getLogger("atlas.scheduler")
+    while True:
+        try:
+            today = date.today().isoformat()
+            with db.connect() as conn:
+                cur = conn.execute("SELECT status FROM builds WHERE date = ?", (today,))
+                row = cur.fetchone()
+            if row is None or row["status"] != "done":
+                log.info("scheduler: building today's digest (status=%s)",
+                         None if row is None else row["status"])
+                try:
+                    await digest.build_today(rank=False)
+                    log.info("scheduler: build complete")
+                except Exception as e:                # noqa: BLE001
+                    log.warning("scheduler: build failed: %s: %s", type(e).__name__, e)
+        except asyncio.CancelledError:
+            raise
+        except Exception:                             # noqa: BLE001
+            log.exception("scheduler tick error")
+        try:
+            await asyncio.sleep(3600)  # 1 hour
+        except asyncio.CancelledError:
+            return
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     db.init()
-    yield
+    scheduler_task = asyncio.create_task(_daily_build_loop())
+    try:
+        yield
+    finally:
+        scheduler_task.cancel()
+        try:
+            await scheduler_task
+        except (asyncio.CancelledError, Exception):   # noqa: BLE001
+            pass
 
 
 app = FastAPI(title="Atlas", lifespan=lifespan)
@@ -43,8 +88,13 @@ app = FastAPI(title="Atlas", lifespan=lifespan)
 
 @app.get("/api/health")
 async def get_health() -> dict:
+    backends = await ai_backend.available_backends()
     return {
-        "ai": health.claude_available(),
+        # Keep the legacy `ai` key so older clients still get a boolean;
+        # true if *any* backend is available.
+        "ai": backends["claude"] or backends["codex"],
+        "backends": backends,
+        "default_backend": ai_backend.DEFAULT_BACKEND,
         "papers_today": len(papers.list_recent(days=1)),
     }
 
@@ -59,9 +109,17 @@ def _row_to_dict(row) -> dict:
 
 
 @app.get("/api/digest")
-async def get_digest(build: bool = False, days: str = "7") -> dict:
+async def get_digest(
+    build: bool = False,
+    days: str = "7",
+    backend: str | None = None,
+    rank: bool = True,
+) -> dict:
     if build:
-        await digest.build_today()
+        await digest.build_today(
+            backend=ai_backend.normalize_backend(backend),
+            rank=rank,
+        )
     days_arg: int | None
     if days == "all":
         days_arg = None
@@ -77,11 +135,26 @@ async def get_digest(build: bool = False, days: str = "7") -> dict:
     return {"count": len(rows), "papers": [_row_to_dict(r) for r in rows]}
 
 
+class ArxivUnavailable(Exception):
+    """arXiv returned a retryable error (throttling, timeout) we couldn't overcome."""
+
+
 async def _ensure_paper_imported(arxiv_id: str) -> bool:
-    """If the paper isn't in the DB, fetch it from arXiv and insert. Return True if known."""
+    """If the paper isn't in the DB, fetch it from arXiv and insert. Return True if known.
+
+    Raises `ArxivUnavailable` on throttle/timeout so the endpoint can turn that
+    into a 503 with a clear message, rather than an opaque 500.
+    """
     if papers.get(arxiv_id) is not None:
         return True
-    paper = await arxiv.fetch_by_id(arxiv_id)
+    try:
+        paper = await arxiv.fetch_by_id(arxiv_id)
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code in (429, 503):
+            raise ArxivUnavailable("arXiv is throttling this IP; try again in a few minutes") from exc
+        raise
+    except (httpx.TimeoutException, httpx.TransportError) as exc:
+        raise ArxivUnavailable(f"arXiv unreachable ({type(exc).__name__})") from exc
     if paper is None:
         return False
     papers.upsert([paper])
@@ -91,7 +164,11 @@ async def _ensure_paper_imported(arxiv_id: str) -> bool:
 @app.get("/api/papers/{arxiv_id}")
 async def get_paper(arxiv_id: str) -> dict:
     """Return paper metadata. Auto-imports from arXiv if not already in DB."""
-    if not await _ensure_paper_imported(arxiv_id):
+    try:
+        imported = await _ensure_paper_imported(arxiv_id)
+    except ArxivUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    if not imported:
         raise HTTPException(status_code=404, detail="paper not found on arXiv")
     row = papers.get(arxiv_id)
     assert row is not None
@@ -102,17 +179,43 @@ async def get_paper(arxiv_id: str) -> dict:
 @app.get("/api/pdf/{arxiv_id}")
 async def get_pdf(arxiv_id: str):
     """Stream the PDF directly from arXiv on every request (no persistent disk cache)."""
-    if not await _ensure_paper_imported(arxiv_id):
+    try:
+        imported = await _ensure_paper_imported(arxiv_id)
+    except ArxivUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    if not imported:
         raise HTTPException(status_code=404, detail="paper not found on arXiv")
 
     pdf_url = f"https://arxiv.org/pdf/{arxiv_id}"
 
+    # Do a HEAD-like probe: open the stream, check status, then either stream
+    # the body or raise a clean HTTPException. Doing the check BEFORE returning
+    # StreamingResponse means 429s surface as a 503 with a JSON message instead
+    # of a partial-body response the browser can't recover from.
+    client = httpx.AsyncClient(timeout=60.0, follow_redirects=True)
+    stream_ctx = client.stream("GET", pdf_url)
+    try:
+        resp = await stream_ctx.__aenter__()
+    except (httpx.TimeoutException, httpx.TransportError) as exc:
+        await client.aclose()
+        raise HTTPException(status_code=503, detail=f"arXiv unreachable ({type(exc).__name__})")
+
+    if resp.status_code in (429, 503):
+        await stream_ctx.__aexit__(None, None, None)
+        await client.aclose()
+        raise HTTPException(status_code=503, detail="arXiv is throttling this IP; try again in a few minutes")
+    if resp.status_code >= 400:
+        await stream_ctx.__aexit__(None, None, None)
+        await client.aclose()
+        raise HTTPException(status_code=resp.status_code, detail=f"arXiv responded {resp.status_code}")
+
     async def _stream():
-        async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
-            async with client.stream("GET", pdf_url) as resp:
-                resp.raise_for_status()
-                async for chunk in resp.aiter_bytes(chunk_size=64 * 1024):
-                    yield chunk
+        try:
+            async for chunk in resp.aiter_bytes(chunk_size=64 * 1024):
+                yield chunk
+        finally:
+            await stream_ctx.__aexit__(None, None, None)
+            await client.aclose()
 
     return StreamingResponse(
         _stream(),
@@ -130,6 +233,7 @@ class AskBody(BaseModel):
     question: str
     history: list[dict] = []
     model: str | None = None
+    backend: str | None = None
 
 
 def _sse_format(chunk: str) -> bytes:
@@ -146,25 +250,33 @@ def _sse_format(chunk: str) -> bytes:
     return f"data: {payload}\n\n".encode("utf-8")
 
 
-_ALLOWED_MODELS = {"opus", "sonnet", "haiku"}
-
-
-def _normalize_model(value: str | None, default: str) -> str:
-    if value and value in _ALLOWED_MODELS:
+def _normalize_model(value: str | None, backend: str) -> str | None:
+    """Return the model if it's in the allowlist for the chosen backend;
+    otherwise None so ai_backend picks the per-(backend, task) default."""
+    if not value:
+        return None
+    if value in ai_argv.allowed_models(backend):          # type: ignore[arg-type]
         return value
-    return default
+    return None
 
 
 @app.post("/api/summarize/{arxiv_id}")
-async def post_summarize(arxiv_id: str, model: str | None = None):
+async def post_summarize(
+    arxiv_id: str,
+    model: str | None = None,
+    backend: str | None = None,
+):
     if papers.get(arxiv_id) is None:
         raise HTTPException(status_code=404, detail="paper not found")
 
-    chosen = _normalize_model(model, "opus")
+    chosen_backend = ai_backend.normalize_backend(backend)
+    chosen_model = _normalize_model(model, chosen_backend)
 
     async def gen():
         try:
-            async for chunk in summarizer.summarize(arxiv_id, model=chosen):
+            async for chunk in summarizer.summarize(
+                arxiv_id, backend=chosen_backend, model=chosen_model,
+            ):
                 yield _sse_format(chunk)
             yield b"event: done\ndata: ok\n\n"
         except Exception as exc:
@@ -179,16 +291,24 @@ async def post_ask(
     arxiv_id: str,
     body: AskBody,
     model: str | None = None,
+    backend: str | None = None,
 ):
     if papers.get(arxiv_id) is None:
         raise HTTPException(status_code=404, detail="paper not found")
 
-    # Prefer query param for consistency, fall back to body.
-    chosen = _normalize_model(model if model is not None else body.model, "opus")
+    # Query param wins, body is fallback.
+    chosen_backend = ai_backend.normalize_backend(backend if backend is not None else body.backend)
+    chosen_model = _normalize_model(
+        model if model is not None else body.model,
+        chosen_backend,
+    )
 
     async def gen():
         try:
-            async for chunk in asker.ask(arxiv_id, body.question, body.history, model=chosen):
+            async for chunk in asker.ask(
+                arxiv_id, body.question, body.history,
+                backend=chosen_backend, model=chosen_model,
+            ):
                 yield _sse_format(chunk)
             yield b"event: done\ndata: ok\n\n"
         except Exception as exc:

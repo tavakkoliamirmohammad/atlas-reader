@@ -13,22 +13,31 @@ from app import conversations as conv_mod
 @pytest.mark.asyncio
 async def test_health_endpoint_returns_ai_status(atlas_data_dir):
     db.init()
-    with patch("app.main.health.claude_available", return_value=True):
+    with patch(
+        "app.main.ai_backend.available_backends",
+        new=AsyncMock(return_value={"claude": True, "codex": False}),
+    ):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
             r = await c.get("/api/health")
     assert r.status_code == 200
     body = r.json()
     assert body["ai"] is True
+    assert body["backends"] == {"claude": True, "codex": False}
+    assert body["default_backend"] == "codex"
     assert "papers_today" in body
 
 
 @pytest.mark.asyncio
-async def test_health_endpoint_when_claude_missing(atlas_data_dir):
+async def test_health_endpoint_when_no_backend_available(atlas_data_dir):
     db.init()
-    with patch("app.main.health.claude_available", return_value=False):
+    with patch(
+        "app.main.ai_backend.available_backends",
+        new=AsyncMock(return_value={"claude": False, "codex": False}),
+    ):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
             r = await c.get("/api/health")
     assert r.json()["ai"] is False
+    assert r.json()["backends"] == {"claude": False, "codex": False}
 
 
 @pytest.mark.asyncio
@@ -86,6 +95,8 @@ async def test_get_pdf_streams_from_arxiv(atlas_data_dir, fixtures_dir):
     from contextlib import asynccontextmanager
 
     class _FakeResp:
+        status_code = 200
+
         def raise_for_status(self):
             pass
 
@@ -104,6 +115,9 @@ async def test_get_pdf_streams_from_arxiv(atlas_data_dir, fixtures_dir):
             return self
 
         async def __aexit__(self, *a):
+            return None
+
+        async def aclose(self):
             return None
 
         stream = _fake_stream
@@ -202,7 +216,7 @@ async def test_summarize_streams_sse_events(atlas_data_dir):
     db.init()
     papers.upsert([Paper("55", "T", "A", "x", "cs.PL", "2026-04-19T08:00:00Z")])
 
-    async def _fake(arxiv_id, model="opus"):
+    async def _fake(arxiv_id, **_kw):
         # Include paragraph break + bold marker — the regression case that
         # broke when chunks were embedded raw into `data:` (the `\n\n` was
         # interpreted as an SSE event terminator and silently dropped).
@@ -260,7 +274,9 @@ async def test_ask_streams_and_accepts_history(atlas_data_dir):
     assert f'data: {_json.dumps({"t": "chunk"})}' in body
     assert captured["question"] == "Why?"
     assert captured["history"][0]["content"] == "earlier"
-    assert captured["model"] == "opus"
+    # Endpoint no longer forces a specific Claude model; ai_backend picks a
+    # task- and backend-appropriate default downstream.
+    assert captured["model"] is None
 
 
 @pytest.mark.asyncio
@@ -275,7 +291,9 @@ async def test_summarize_query_model_overrides_default(atlas_data_dir):
 
     with patch("app.main.summarizer.summarize", _fake):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
-            await c.post("/api/summarize/88?model=haiku")
+            # Claude-specific model override requires `backend=claude`; otherwise
+            # Codex's allowlist rejects "haiku" and the default kicks in.
+            await c.post("/api/summarize/88?backend=claude&model=haiku")
 
     assert captured["model"] == "haiku"
 
@@ -293,7 +311,7 @@ async def test_ask_query_model_overrides_body(atlas_data_dir):
     with patch("app.main.asker.ask", _fake):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
             await c.post(
-                "/api/ask/89?model=opus",
+                "/api/ask/89?backend=claude&model=opus",
                 json={"question": "Q", "history": [], "model": "haiku"},
             )
 
@@ -314,7 +332,7 @@ async def test_ask_body_model_used_when_no_query(atlas_data_dir):
     with patch("app.main.asker.ask", _fake):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
             await c.post(
-                "/api/ask/90",
+                "/api/ask/90?backend=claude",
                 json={"question": "Q", "history": [], "model": "haiku"},
             )
 

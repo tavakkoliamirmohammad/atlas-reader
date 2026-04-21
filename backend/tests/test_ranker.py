@@ -11,7 +11,7 @@ SAMPLES = [
 ]
 
 
-async def _fake_stream(args, stdin_text=None):
+async def _fake_stream(**kwargs):
     yield '[{"id":"1","score":5},'
     yield '{"id":"2","score":1}]'
 
@@ -21,7 +21,7 @@ async def test_score_papers_writes_tier_and_score(atlas_data_dir):
     db.init()
     papers.upsert(SAMPLES)
 
-    with patch("app.ranker.claude_subprocess.run_streaming", _fake_stream):
+    with patch("app.ranker.ai_backend.run_ai", _fake_stream):
         await ranker.score_papers(SAMPLES)
 
     row1 = papers.get("1")
@@ -33,23 +33,22 @@ async def test_score_papers_writes_tier_and_score(atlas_data_dir):
 
 
 @pytest.mark.asyncio
-async def test_score_papers_passes_haiku_model_and_prompt(atlas_data_dir):
+async def test_score_papers_passes_rank_task_and_prompt(atlas_data_dir):
     db.init()
     papers.upsert(SAMPLES)
-    spy_args = {}
+    captured: dict = {}
 
-    async def _capture(args, stdin_text=None):
-        spy_args["args"] = list(args)
-        spy_args["stdin"] = stdin_text
+    async def _capture(**kwargs):
+        captured.update(kwargs)
         yield "[]"
 
-    with patch("app.ranker.claude_subprocess.run_streaming", _capture):
+    with patch("app.ranker.ai_backend.run_ai", _capture):
         await ranker.score_papers(SAMPLES)
 
-    assert "--model" in spy_args["args"]
-    assert "haiku" in spy_args["args"]
-    assert "MLIR for X" in spy_args["stdin"]
-    assert "NLP Survey" in spy_args["stdin"]
+    assert captured["task"] == "rank"
+    assert captured["directive"] == "Score the papers below."
+    assert "MLIR for X" in captured["prompt"]
+    assert "NLP Survey" in captured["prompt"]
 
 
 @pytest.mark.asyncio
@@ -57,13 +56,13 @@ async def test_score_papers_no_op_on_empty_list(atlas_data_dir):
     db.init()
     called = False
 
-    async def _never(args, stdin_text=None):
+    async def _never(**kwargs):
         nonlocal called
         called = True
         if False:
             yield ""
 
-    with patch("app.ranker.claude_subprocess.run_streaming", _never):
+    with patch("app.ranker.ai_backend.run_ai", _never):
         await ranker.score_papers([])
 
     assert called is False
@@ -74,10 +73,10 @@ async def test_score_papers_tolerates_malformed_json(atlas_data_dir):
     db.init()
     papers.upsert(SAMPLES)
 
-    async def _bad(args, stdin_text=None):
+    async def _bad(**kwargs):
         yield "this is not json"
 
-    with patch("app.ranker.claude_subprocess.run_streaming", _bad):
-        await ranker.score_papers(SAMPLES)  # must not raise
+    with patch("app.ranker.ai_backend.run_ai", _bad):
+        await ranker.score_papers(SAMPLES)
 
     assert papers.get("1")["ai_tier"] is None

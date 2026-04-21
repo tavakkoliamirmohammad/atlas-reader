@@ -5,7 +5,7 @@ from __future__ import annotations
 import sqlite3
 from datetime import date, datetime, timezone
 
-from app import arxiv, db, health, papers, ranker
+from app import ai_backend, arxiv, db, health, papers, ranker
 
 
 # Mirrors ~/.claude/compiler-papers.sh
@@ -57,27 +57,42 @@ def _finish_build(status: str, paper_count: int = 0, log: str = "") -> None:
         )
 
 
-async def build_today() -> list[sqlite3.Row]:
-    """Fetch both arXiv queries, dedupe, persist, and return the row set."""
+async def build_today(
+    backend: str = ai_backend.DEFAULT_BACKEND,
+    rank: bool = True,
+) -> list[sqlite3.Row]:
+    """Fetch both arXiv queries, dedupe, persist, and return the row set.
+
+    When `rank` is True and the chosen backend's CLI is available, also runs
+    the AI ranker on all papers. Set `rank=False` to return as soon as the
+    arXiv fetch completes — useful when the caller wants the paper list fast
+    and does not care about AI tier ordering.
+
+    Ranker failures are logged but never block the build.
+    """
     _start_build()
     try:
         pl = await arxiv.fetch_recent(PL_QUERY, max_results=100)
         other = await arxiv.fetch_recent(KEYWORD_QUERY, max_results=30)
-
-        seen: dict[str, arxiv.Paper] = {}
-        for p in (*pl, *other):
-            seen.setdefault(p.arxiv_id, p)
-
-        papers.upsert(list(seen.values()))
-        if health.claude_available():
-            try:
-                await ranker.score_papers(list(seen.values()))
-            except Exception as exc:
-                import logging
-                logging.getLogger(__name__).warning("ranker failed: %s", exc)
-        rows = papers.list_recent(days=7)
-        _finish_build(status="done", paper_count=len(seen))
-        return rows
     except Exception as e:
+        # arXiv throttle / timeout / network flap. Don't propagate to the UI —
+        # return whatever is already cached in the DB so the list still loads.
+        import logging
+        logging.getLogger(__name__).warning("arxiv fetch failed: %s: %s", type(e).__name__, e)
         _finish_build(status="failed", log=f"{type(e).__name__}: {e}")
-        raise
+        return papers.list_recent(days=7)
+
+    seen: dict[str, arxiv.Paper] = {}
+    for p in (*pl, *other):
+        seen.setdefault(p.arxiv_id, p)
+
+    papers.upsert(list(seen.values()))
+    if rank and health.backend_available(backend):
+        try:
+            await ranker.score_papers(list(seen.values()), backend=backend)
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).warning("ranker failed: %s", exc)
+    rows = papers.list_recent(days=7)
+    _finish_build(status="done", paper_count=len(seen))
+    return rows

@@ -1,4 +1,4 @@
-"""Stream a chat answer using `claude -p`. Ephemeral — does NOT persist messages.
+"""Stream a chat answer about a paper. Ephemeral — does NOT persist messages.
 
 Per user privacy preference: conversations live only in the frontend's React
 state. They evaporate when the user switches papers or refreshes the page.
@@ -7,9 +7,9 @@ state. They evaporate when the user switches papers or refreshes the page.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import AsyncIterator, List, TypedDict
+from typing import AsyncIterator, List, Optional, TypedDict
 
-from app import claude_subprocess, papers, pdf_cache
+from app import ai_backend, papers, pdf_cache
 
 
 SYSTEM_PATH = Path(__file__).parent / "prompts" / "chat_system.txt"
@@ -34,7 +34,9 @@ async def ask(
     arxiv_id: str,
     question: str,
     history: List[ChatMessage],
-    model: str = "sonnet",
+    *,
+    backend: str = ai_backend.DEFAULT_BACKEND,
+    model: Optional[str] = None,
 ) -> AsyncIterator[str]:
     """Yield answer chunks as they stream. No DB writes."""
     if papers.get(arxiv_id) is None:
@@ -50,8 +52,12 @@ async def ask(
         f"\n\nUSER QUESTION: {question}\n"
     )
 
-    async for chunk in claude_subprocess.run_streaming(
-        ["--model", model, "--allowedTools", "Read", "-p", "Answer the question."],
-        stdin_text=prompt,
+    async for chunk in ai_backend.run_ai(
+        backend=ai_backend.normalize_backend(backend),
+        task="ask",
+        directive="Answer the question.",
+        prompt=prompt,
+        model=model,
+        enable_read_file=str(pdf_path),
     ):
         yield chunk

@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 
 import httpx
+
+
+log = logging.getLogger(__name__)
 
 
 _NS = {"atom": "http://www.w3.org/2005/Atom"}
@@ -66,6 +71,48 @@ def parse_feed(xml_text: str) -> list[Paper]:
 
 ARXIV_ENDPOINT = "https://export.arxiv.org/api/query"
 
+# arXiv occasionally 429s when Atlas rebuilds in quick succession or a dev
+# hammers the endpoint from multiple clients. Retry with exponential backoff
+# (honors Retry-After when present) so a transient throttle doesn't fail the
+# whole build.
+_RETRY_STATUSES = (429, 503)
+_RETRY_BACKOFFS = (2.0, 6.0, 15.0)  # seconds between retries; ~23s total worst case
+
+
+async def _get_with_retry(client: httpx.AsyncClient, params: dict) -> httpx.Response:
+    """GET with backoff on 429/503 responses or request timeouts.
+
+    arXiv tends to throttle via slow/timed-out responses rather than 429s when
+    the abuse is severe, so timeouts are retried the same way.
+    """
+    last_exc: Exception | None = None
+    for wait in (*_RETRY_BACKOFFS, None):
+        try:
+            resp = await client.get(ARXIV_ENDPOINT, params=params)
+            if resp.status_code in _RETRY_STATUSES and wait is not None:
+                retry_after = resp.headers.get("retry-after")
+                delay = float(retry_after) if retry_after and retry_after.isdigit() else wait
+                log.info("arxiv throttled (HTTP %d), retrying in %.1fs", resp.status_code, delay)
+                await asyncio.sleep(delay)
+                continue
+            resp.raise_for_status()
+            return resp
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code not in _RETRY_STATUSES:
+                raise
+            last_exc = exc
+            if wait is None:
+                raise
+            await asyncio.sleep(wait)
+        except (httpx.TimeoutException, httpx.TransportError) as exc:
+            last_exc = exc
+            if wait is None:
+                raise
+            log.info("arxiv request failed (%s), retrying in %.1fs", type(exc).__name__, wait)
+            await asyncio.sleep(wait)
+    assert last_exc is not None
+    raise last_exc
+
 
 async def fetch_recent(query: str, max_results: int = 100, timeout: float = 30.0) -> list[Paper]:
     """Hit the arXiv API and parse the response. `query` is an arXiv search_query string."""
@@ -76,15 +123,13 @@ async def fetch_recent(query: str, max_results: int = 100, timeout: float = 30.0
         "max_results": str(max_results),
     }
     async with httpx.AsyncClient(timeout=timeout) as client:
-        resp = await client.get(ARXIV_ENDPOINT, params=params)
-        resp.raise_for_status()
+        resp = await _get_with_retry(client, params)
         return parse_feed(resp.text)
 
 
 async def fetch_by_id(arxiv_id: str, timeout: float = 30.0) -> Paper | None:
     """Fetch a single paper from arXiv by ID. Returns None if not found."""
     async with httpx.AsyncClient(timeout=timeout) as client:
-        resp = await client.get(ARXIV_ENDPOINT, params={"id_list": arxiv_id})
-        resp.raise_for_status()
+        resp = await _get_with_retry(client, {"id_list": arxiv_id})
         items = parse_feed(resp.text)
     return items[0] if items else None

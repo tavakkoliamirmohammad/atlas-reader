@@ -2,14 +2,21 @@ import { useEffect, useState } from "react";
 import { ThemePicker } from "./ThemePicker";
 import { PanelToggles } from "./PanelToggles";
 import { AiStatusPill } from "./AiStatusPill";
+import { BackendPicker } from "./BackendPicker";
 import { Greeting } from "./Greeting";
 import { Streak } from "./Streak";
 import { api } from "@/lib/api";
 
 export function TopBar() {
   const [ai, setAi] = useState<boolean | null>(null);
+  const [backends, setBackends] = useState<{ claude: boolean; codex: boolean } | null>(null);
   useEffect(() => {
-    api.health().then((h) => setAi(h.ai)).catch(() => setAi(false));
+    api.health()
+      .then((h) => {
+        setAi(h.ai);
+        if (h.backends) setBackends(h.backends);
+      })
+      .catch(() => setAi(false));
   }, []);
 
   return (
@@ -25,6 +32,7 @@ export function TopBar() {
         <Greeting />
       </div>
       <div className="flex-1" />
+      <BackendPicker available={backends} />
       <ThemePicker />
       <PanelToggles />
       <AiStatusPill ai={ai} />

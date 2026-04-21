@@ -50,20 +50,23 @@ async def test_build_today_writes_build_status_row(atlas_data_dir):
 
 @pytest.mark.asyncio
 async def test_build_today_records_failure_when_fetch_raises(atlas_data_dir):
+    """arXiv failures mark the build row as failed but don't propagate — we
+    return whatever is already cached so the UI still loads a list.
+    """
     db.init()
     with patch(
         "app.digest.arxiv.fetch_recent",
         new=AsyncMock(side_effect=RuntimeError("arxiv down")),
     ):
-        with pytest.raises(RuntimeError, match="arxiv down"):
-            await digest.build_today()
+        rows = await digest.build_today()
 
+    assert rows == []  # nothing cached yet
     with db.connect() as conn:
-        rows = list(conn.execute("SELECT status, log FROM builds"))
-    assert len(rows) == 1
-    assert rows[0]["status"] == "failed"
-    assert "RuntimeError" in rows[0]["log"]
-    assert "arxiv down" in rows[0]["log"]
+        build_rows = list(conn.execute("SELECT status, log FROM builds"))
+    assert len(build_rows) == 1
+    assert build_rows[0]["status"] == "failed"
+    assert "RuntimeError" in build_rows[0]["log"]
+    assert "arxiv down" in build_rows[0]["log"]
 
 
 @pytest.mark.asyncio
@@ -72,12 +75,12 @@ async def test_build_today_calls_ranker_when_ai_available(atlas_data_dir):
     pl = [Paper("a", "T", "A", "x", "cs.PL", "2026-04-19T08:00:00Z")]
 
     with patch("app.digest.arxiv.fetch_recent", new=AsyncMock(side_effect=[pl, []])):
-        with patch("app.digest.health.claude_available", return_value=True):
+        with patch("app.digest.health.backend_available", return_value=True):
             with patch("app.digest.ranker.score_papers", new=AsyncMock()) as spy:
                 await digest.build_today()
 
     spy.assert_awaited_once()
-    args, _ = spy.call_args
+    args, kwargs = spy.call_args
     assert args[0][0].arxiv_id == "a"
 
 
@@ -85,7 +88,7 @@ async def test_build_today_calls_ranker_when_ai_available(atlas_data_dir):
 async def test_build_today_skips_ranker_when_ai_unavailable(atlas_data_dir):
     db.init()
     with patch("app.digest.arxiv.fetch_recent", new=AsyncMock(side_effect=[[], []])):
-        with patch("app.digest.health.claude_available", return_value=False):
+        with patch("app.digest.health.backend_available", return_value=False):
             with patch("app.digest.ranker.score_papers", new=AsyncMock()) as spy:
                 await digest.build_today()
 

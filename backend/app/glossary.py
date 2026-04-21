@@ -1,10 +1,10 @@
 """Per-paper LLM-generated glossary repository.
 
-Two operations talk to Claude:
-- `extract_terms` runs Sonnet on the abstract once per paper, returns a JSON
-  array of term strings, and inserts them with NULL definitions.
-- `define` lazily generates a one-line explainer for a single term and
-  persists it so subsequent hovers are free.
+Two operations talk to an AI backend (default codex):
+- `extract_terms` runs on the abstract once per paper, returns a JSON array of
+  term strings, and inserts them with NULL definitions.
+- `define` lazily generates a one-line explainer for a single term and persists
+  it so subsequent hovers are free.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ import json
 import sqlite3
 from typing import List, Optional
 
-from app import claude_subprocess, db, papers
+from app import ai_backend, db, papers
 
 
 _EXTRACT_PROMPT = (
@@ -24,10 +24,19 @@ _EXTRACT_PROMPT = (
 )
 
 
-async def _run_text(args: list[str], stdin_text: Optional[str] = None) -> str:
-    """Collect every chunk from claude_subprocess.run_streaming into one string."""
+async def _run_text(
+    directive: str,
+    prompt: str,
+    backend: str = ai_backend.DEFAULT_BACKEND,
+) -> str:
+    """Collect every chunk from ai_backend.run_ai into one string."""
     parts: list[str] = []
-    async for chunk in claude_subprocess.run_streaming(args, stdin_text=stdin_text):
+    async for chunk in ai_backend.run_ai(
+        backend=ai_backend.normalize_backend(backend),
+        task="glossary",
+        directive=directive,
+        prompt=prompt,
+    ):
         parts.append(chunk)
     return "".join(parts)
 
@@ -39,10 +48,8 @@ def _parse_terms(raw: str) -> list[str]:
     if needed, scan for the first `[ ... ]` substring as a fallback.
     """
     text = raw.strip()
-    # Strip accidental ```json fences.
     if text.startswith("```"):
         text = text.strip("`")
-        # Drop a leading 'json' language tag if present.
         if text.lower().startswith("json"):
             text = text[4:]
         text = text.strip()
@@ -72,12 +79,15 @@ def _parse_terms(raw: str) -> list[str]:
     return out
 
 
-async def extract_terms(arxiv_id: str) -> list[str]:
-    """Ask Sonnet for technical terms in this paper's abstract; persist them.
+async def extract_terms(
+    arxiv_id: str,
+    *,
+    backend: str = ai_backend.DEFAULT_BACKEND,
+) -> list[str]:
+    """Ask the AI for technical terms in this paper's abstract; persist them.
 
-    Returns the list of terms (in insertion order). Existing rows with the same
-    (arxiv_id, term) are preserved (UNIQUE constraint, ON CONFLICT IGNORE) so
-    re-running extraction is idempotent and does not clobber cached definitions.
+    Existing rows with the same (arxiv_id, term) are preserved via ON CONFLICT
+    IGNORE so re-running is idempotent and does not clobber cached definitions.
     """
     paper = papers.get(arxiv_id)
     if paper is None:
@@ -88,10 +98,7 @@ async def extract_terms(arxiv_id: str) -> list[str]:
         return []
 
     prompt = f"ABSTRACT:\n{abstract}\n\n{_EXTRACT_PROMPT}"
-    raw = await _run_text(
-        ["--model", "sonnet", "-p", "Extract terms as a JSON array."],
-        stdin_text=prompt,
-    )
+    raw = await _run_text("Extract terms as a JSON array.", prompt, backend=backend)
     terms = _parse_terms(raw)
     if not terms:
         return []
@@ -104,7 +111,12 @@ async def extract_terms(arxiv_id: str) -> list[str]:
     return terms
 
 
-async def define(arxiv_id: str, term: str) -> str:
+async def define(
+    arxiv_id: str,
+    term: str,
+    *,
+    backend: str = ai_backend.DEFAULT_BACKEND,
+) -> str:
     """Return the cached definition for `term`, or generate + persist one."""
     if papers.get(arxiv_id) is None:
         raise KeyError(arxiv_id)
@@ -122,17 +134,12 @@ async def define(arxiv_id: str, term: str) -> str:
         f"In ONE sentence (max 25 words), explain '{term}' for a compilers "
         f"PhD student. No preface, no quotes, just the sentence."
     )
-    raw = await _run_text(
-        ["--model", "sonnet", "-p", "Define the term."],
-        stdin_text=prompt,
-    )
+    raw = await _run_text("Define the term.", prompt, backend=backend)
     definition = raw.strip()
     if not definition:
         definition = f"(no definition available for '{term}')"
 
     with db.connect() as conn:
-        # Upsert: insert if missing (e.g. caller asked about a term that was
-        # never extracted), otherwise update the existing row's definition.
         conn.execute(
             "INSERT INTO glossary (arxiv_id, term, definition) VALUES (?, ?, ?) "
             "ON CONFLICT(arxiv_id, term) DO UPDATE SET definition=excluded.definition",

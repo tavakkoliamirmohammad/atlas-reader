@@ -1,8 +1,10 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
-import type { DigestRange, HighlightColor, ModelChoice } from "@/lib/api";
+import type {
+  Backend, CodexModel, DigestRange, HighlightColor, ModelChoice,
+} from "@/lib/api";
 
-export type { DigestRange, ModelChoice };
+export type { Backend, CodexModel, DigestRange, ModelChoice };
 
 export type ReadingMode = "light" | "sepia" | "dark";
 
@@ -17,9 +19,13 @@ type UiState = {
   rightCollapsed: boolean;
   readingMode: ReadingMode;
   model: ModelChoice;
+  codexModel: CodexModel;
+  backend: Backend;
   lastHighlightColor: HighlightColor;
   digestRange: DigestRange;
   setDigestRange: (r: DigestRange) => void;
+  setBackend: (b: Backend) => void;
+  setCodexModel: (m: CodexModel) => void;
   // Ephemeral action dispatchers — NOT persisted. The action-id counters let
   // subscribers fire on each increment via a `useEffect(..., [id])`.
   summarizeRequestId: number;
@@ -50,9 +56,13 @@ export const useUiStore = create<UiState>()(
       rightCollapsed: false,
       readingMode: "light",
       model: "sonnet",
+      codexModel: "gpt-5.4",
+      backend: "codex",
       lastHighlightColor: "yellow",
       digestRange: 7,
       setDigestRange: (r) => set({ digestRange: r }),
+      setBackend: (b) => set({ backend: b }),
+      setCodexModel: (m) => set({ codexModel: m }),
       summarizeRequestId: 0,
       askRequest: null,
       pinnedQuote: null,
@@ -88,6 +98,8 @@ export const useUiStore = create<UiState>()(
         rightCollapsed: s.rightCollapsed,
         readingMode: s.readingMode,
         model: s.model,
+        codexModel: s.codexModel,
+        backend: s.backend,
         lastHighlightColor: s.lastHighlightColor,
         digestRange: s.digestRange,
       }),

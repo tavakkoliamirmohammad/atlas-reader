@@ -39,12 +39,15 @@ export default function App() {
   const [buildOpen, setBuildOpen] = useState(false);
   const todayISO = new Date().toISOString().slice(0, 10);
 
-  // On first load, if /api/digest is empty, kick off a build with progress overlay
+  // On first load, if /api/digest is empty, kick off a build with progress overlay.
+  // `rank=false` skips the AI tiering pass so papers appear as soon as arXiv
+  // responds. Ranking becomes opt-in via UI action rather than a blocking
+  // first-load cost.
   useEffect(() => {
     fetch("/api/digest").then((r) => r.json()).then((b) => {
       if ((b?.count ?? 0) === 0) {
         setBuildOpen(true);
-        fetch("/api/digest?build=true").catch(() => {});
+        fetch("/api/digest?build=true&rank=false").catch(() => {});
       }
     }).catch(() => {});
   }, []);

@@ -18,6 +18,8 @@ async def test_full_round_trip_health_digest_paper_pdf(atlas_data_dir, fixtures_
     pdf_bytes = (fixtures_dir / "tiny.pdf").read_bytes()
 
     class _FakeResp:
+        status_code = 200
+
         def raise_for_status(self):
             pass
 
@@ -38,11 +40,17 @@ async def test_full_round_trip_health_digest_paper_pdf(atlas_data_dir, fixtures_
         async def __aexit__(self, *a):
             return None
 
+        async def aclose(self):
+            return None
+
         stream = _fake_stream
 
     with patch("app.digest.arxiv.fetch_recent", new=AsyncMock(side_effect=[pl, other])):
         with patch("app.main.httpx.AsyncClient", _FakeClient):
-            with patch("app.main.health.claude_available", return_value=False):
+            with patch(
+                "app.main.ai_backend.available_backends",
+                new=AsyncMock(return_value={"claude": False, "codex": False}),
+            ), patch("app.digest.health.backend_available", return_value=False):
                 async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
                     h = await c.get("/api/health")
                     assert h.json()["ai"] is False

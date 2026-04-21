@@ -1,4 +1,8 @@
-"""Score papers 1-5 by relevance using `claude -p --model haiku`."""
+"""Score papers 1-5 by relevance.
+
+Routes through `ai_backend.run_ai`; uses the default model for the `rank` task
+(claude=haiku, codex=gpt-5).
+"""
 
 from __future__ import annotations
 
@@ -7,7 +11,7 @@ import logging
 from pathlib import Path
 from typing import Iterable
 
-from app import claude_subprocess, db
+from app import ai_backend, db
 from app.arxiv import Paper
 
 
@@ -19,19 +23,13 @@ PROMPT_PATH = Path(__file__).parent / "prompts" / "ranker.txt"
 def _strip_code_fence(raw: str) -> str:
     r"""Strip a leading ``` / ```json fence and trailing ``` if present.
 
-    Claude Haiku regularly wraps array output in a markdown code fence; the
-    ranker's json.loads fails on the raw fenced string. The fence can be
-    ```json or plain ``` with whitespace/newlines around the body.
+    Models regularly wrap array output in a markdown code fence; json.loads
+    fails on the raw fenced string.
     """
     s = raw.strip()
     if s.startswith("```"):
-        # Drop the opening fence line (``` or ```json) through to the first newline.
         first_nl = s.find("\n")
-        if first_nl != -1:
-            s = s[first_nl + 1 :]
-        else:
-            s = s[3:]
-        # Drop a trailing closing fence if present.
+        s = s[first_nl + 1 :] if first_nl != -1 else s[3:]
         if s.rstrip().endswith("```"):
             s = s.rstrip()[:-3]
     return s.strip()
@@ -45,7 +43,11 @@ def _build_prompt(papers_list: list[Paper]) -> str:
     return PROMPT_PATH.read_text().replace("{papers_block}", block)
 
 
-async def score_papers(items: Iterable[Paper]) -> None:
+async def score_papers(
+    items: Iterable[Paper],
+    *,
+    backend: str = ai_backend.DEFAULT_BACKEND,
+) -> None:
     """Score each paper 1-5 and write ai_tier/ai_score to the papers table."""
     items = list(items)
     if not items:
@@ -53,15 +55,15 @@ async def score_papers(items: Iterable[Paper]) -> None:
 
     prompt = _build_prompt(items)
     chunks: list[str] = []
-    async for c in claude_subprocess.run_streaming(
-        ["--model", "haiku", "-p", "Score the papers below."],
-        stdin_text=prompt,
+    async for c in ai_backend.run_ai(
+        backend=ai_backend.normalize_backend(backend),
+        task="rank",
+        directive="Score the papers below.",
+        prompt=prompt,
     ):
         chunks.append(c)
     raw = "".join(chunks).strip()
 
-    # Claude often wraps JSON output in a ```json fence. Strip it before parsing
-    # so the array inside still loads cleanly.
     cleaned = _strip_code_fence(raw)
 
     try:
