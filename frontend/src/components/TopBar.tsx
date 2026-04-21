@@ -5,7 +5,6 @@ import { AiStatusPill } from "./AiStatusPill";
 import { BackendPicker } from "./BackendPicker";
 import { AppModeToggle } from "./AppModeToggle";
 import { Greeting } from "./Greeting";
-import { Streak } from "./Streak";
 import { api } from "@/lib/api";
 
 export function TopBar() {
@@ -38,7 +37,6 @@ export function TopBar() {
       <AppModeToggle />
       <PanelToggles />
       <AiStatusPill ai={ai} />
-      <Streak />
     </div>
   );
 }

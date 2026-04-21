@@ -1,21 +1,28 @@
 type Props = { ai: boolean | null };
 
+/**
+ * Minimal AI status indicator — a single glowing dot, sized to match the
+ * other top-bar icon buttons. The full text label lives in the tooltip so
+ * the top bar stays uncluttered.
+ */
 export function AiStatusPill({ ai }: Props) {
   const off = ai === false;
-  const label = ai === null ? "AI: checking…" : ai ? "AI: connected" : "AI: offline";
+  const pending = ai === null;
+  const label = pending ? "Checking AI backend…" : off ? "AI offline" : "AI connected";
+  const color = pending ? "#64748b" : off ? "#6b7280" : "#10b981";
+  const glow = off || pending ? "none" : "0 0 8px #10b981";
   return (
-    <div className={[
-      "flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs",
-      "bg-white/[0.04] border border-white/5",
-      off ? "text-slate-400" : "text-slate-300",
-    ].join(" ")}>
+    <span
+      role="status"
+      aria-label={label}
+      title={label}
+      className="inline-flex items-center justify-center w-7 h-7"
+    >
       <span
-        className="w-[7px] h-[7px] rounded-full"
-        style={off
-          ? { background: "#6b7280" }
-          : { background: "#10b981", boxShadow: "0 0 10px #10b981" }}
+        aria-hidden
+        className="w-2 h-2 rounded-full"
+        style={{ background: color, boxShadow: glow }}
       />
-      <span>{label}</span>
-    </div>
+    </span>
   );
 }
