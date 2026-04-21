@@ -7,6 +7,7 @@ import { UrlBar } from "./UrlBar";
 import { PaperRow } from "./PaperRow";
 
 const RANGE_OPTIONS: { value: DigestRange; label: string }[] = [
+  { value: 1,     label: "1d" },
   { value: 3,     label: "3d" },
   { value: 7,     label: "7d" },
   { value: 14,    label: "14d" },

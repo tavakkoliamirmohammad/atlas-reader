@@ -1,10 +1,8 @@
 import { useEffect, useState } from "react";
-import { ThemePicker } from "./ThemePicker";
 import { PanelToggles } from "./PanelToggles";
 import { AiStatusPill } from "./AiStatusPill";
 import { BackendPicker } from "./BackendPicker";
-import { AppModeToggle } from "./AppModeToggle";
-import { Greeting } from "./Greeting";
+import { AppearanceMenu } from "./AppearanceMenu";
 import { api } from "@/lib/api";
 
 export function TopBar() {
@@ -20,8 +18,9 @@ export function TopBar() {
   }, []);
 
   return (
-    <div className="relative z-10 flex flex-wrap items-center gap-2 px-4 py-2.5 border-b border-white/5 bg-[rgba(8,8,13,0.6)] backdrop-blur-xl">
-      <div className="flex items-center gap-2">
+    <div className="relative z-10 flex items-center gap-3 px-4 h-[52px] border-b border-white/5 bg-[rgba(8,8,13,0.6)] backdrop-blur-xl">
+      {/* Brand */}
+      <div className="flex items-center gap-2 shrink-0">
         <div
           className="w-[30px] h-[30px] rounded-[9px] flex items-center justify-center text-[14px] font-extrabold"
           style={{ background: "var(--user-grad)", color: "var(--user-ink)", boxShadow: "0 0 24px var(--ac1-mid)" }}
@@ -29,14 +28,19 @@ export function TopBar() {
           A
         </div>
         <div className="text-sm font-semibold text-slate-100">Atlas</div>
-        <Greeting />
       </div>
-      <div className="flex-1" />
+
+      <div aria-hidden className="flex-1" />
+
+      {/* Primary task control */}
       <BackendPicker available={backends} />
-      <ThemePicker />
-      <AppModeToggle />
-      <PanelToggles />
-      <AiStatusPill ai={ai} />
+
+      {/* Secondary controls — icon only */}
+      <div className="flex items-center gap-1">
+        <PanelToggles />
+        <AppearanceMenu />
+        <AiStatusPill ai={ai} />
+      </div>
     </div>
   );
 }
