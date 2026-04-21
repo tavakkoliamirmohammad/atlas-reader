@@ -229,19 +229,26 @@ function ZoomedModal({ svg, onClose }: { svg: string; onClose: () => void }) {
   }
   function reset() { setScale(1); setTx(0); setTy(0); }
 
+  // Use solid inline-style backgrounds here instead of Tailwind bg-black/NN
+  // classes — our globals.css has light-mode overrides for those utilities
+  // (rgba alpha gets dialed way down), which would leave the modal
+  // translucent and bleed the chat UI through the card.
+  const isLight = typeof document !== "undefined"
+    && document.documentElement.dataset.appMode === "light";
+  const cardBg = isLight ? "#ffffff" : "#0b0f17";
+  const cardBorder = isLight ? "rgba(15, 23, 42, 0.1)" : "rgba(255, 255, 255, 0.1)";
+
   return (
     <div
       role="dialog"
       aria-label="Zoomed Mermaid diagram"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm mermaid-zoom-host"
+      className="fixed inset-0 z-50 mermaid-zoom-host"
+      style={{ background: cardBg }}
       onClick={onClose}
     >
       <div
-        className="relative w-[min(95vw,1200px)] h-[min(90vh,800px)] rounded-xl overflow-hidden shadow-2xl"
-        style={{
-          background: "var(--surface-overlay)",
-          border: "1px solid var(--surface-overlay-border)",
-        }}
+        className="absolute inset-0 overflow-hidden"
+        style={{ background: cardBg, borderTop: `1px solid ${cardBorder}` }}
         onClick={(e) => e.stopPropagation()}
       >
         <button
