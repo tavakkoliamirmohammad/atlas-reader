@@ -67,8 +67,13 @@ function GenericModelPicker<T extends string>({
       </button>
       {open && (
         <div
-          className="absolute bottom-full left-0 mb-1.5 w-44 rounded-xl bg-zinc-900/95 backdrop-blur-md border border-white/10 shadow-2xl overflow-hidden z-30"
+          className="absolute bottom-full left-0 mb-1.5 w-44 rounded-xl backdrop-blur-md shadow-2xl overflow-hidden z-30"
           role="listbox"
+          style={{
+            background: "var(--surface-overlay)",
+            border: "1px solid var(--surface-overlay-border)",
+            color: "var(--surface-overlay-text)",
+          }}
         >
           {options.map((m) => {
             const active = m === model;

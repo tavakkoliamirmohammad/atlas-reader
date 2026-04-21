@@ -16,6 +16,21 @@
   --ink:        6 18 26;
   --left-w: 270px;
   --right-w: 320px;
+
+  /* Popover + overlay surfaces. These flip in light mode via the
+     html[data-app-mode="light"] block below so dropdowns don't stay
+     black on a white canvas. */
+  --surface-overlay:        rgba(11, 15, 23, 0.96);
+  --surface-overlay-border: rgba(255, 255, 255, 0.10);
+  --surface-overlay-text:   #e2e8f0;
+  --surface-overlay-muted:  #94a3b8;
+}
+
+html[data-app-mode="light"] {
+  --surface-overlay:        rgba(255, 255, 255, 0.98);
+  --surface-overlay-border: rgba(15, 23, 42, 0.10);
+  --surface-overlay-text:   #0f172a;
+  --surface-overlay-muted:  #64748b;
 }
 
 html, body, #root { height: 100%; overflow: hidden; }

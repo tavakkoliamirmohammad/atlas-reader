@@ -87,7 +87,12 @@ export function AppearanceMenu() {
         <div
           role="dialog"
           aria-label="Appearance"
-          className="absolute top-full right-0 mt-2 z-50 w-64 p-3 rounded-xl border border-white/10 bg-[#0b0f17] shadow-2xl flex flex-col gap-3 text-slate-200"
+          className="absolute top-full right-0 mt-2 z-50 w-64 p-3 rounded-xl shadow-2xl flex flex-col gap-3 backdrop-blur-md"
+          style={{
+            background: "var(--surface-overlay)",
+            border: "1px solid var(--surface-overlay-border)",
+            color: "var(--surface-overlay-text)",
+          }}
         >
           {/* Theme mode — segmented Light / Dark */}
           <div>

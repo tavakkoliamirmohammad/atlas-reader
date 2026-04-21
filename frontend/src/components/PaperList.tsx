@@ -256,7 +256,7 @@ export function PaperList() {
         ref={pickerRef}
         role="tablist"
         aria-label="Archive range"
-        className="relative rounded-xl border border-white/5 bg-white/[0.02] p-1 grid grid-cols-5 gap-0 mx-2 mb-2"
+        className="relative rounded-xl border border-white/5 bg-white/[0.02] p-1 grid grid-cols-6 gap-0 mx-2 mb-2"
       >
         <div
           aria-hidden
