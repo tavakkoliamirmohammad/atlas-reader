@@ -58,11 +58,17 @@ function useMermaidSvg(code: string, appMode: string) {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    // htmlLabels=false forces mermaid to emit plain <text> nodes instead of
+    // wrapping labels in <foreignObject><div>…</div></foreignObject>. Our
+    // DOMPurify SVG profile strips foreignObject, which was leaving every
+    // node/edge label blank. SVG text is rendered natively and survives the
+    // sanitizer pass.
     mermaid.initialize({
       startOnLoad: false,
       theme: appMode === "light" ? "default" : "dark",
       securityLevel: "strict",
       fontFamily: "Inter, system-ui, sans-serif",
+      flowchart: { htmlLabels: false, useMaxWidth: true },
     });
   }, [appMode]);
 
