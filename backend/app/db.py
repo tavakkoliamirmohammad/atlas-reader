@@ -129,6 +129,13 @@ def init() -> None:
         if "rects" not in cols:
             conn.execute("ALTER TABLE highlights ADD COLUMN rects TEXT")
 
+        # Migration: add `model TEXT` to conversations (which AI backend/model
+        # wrote the answer). NULL for rows predating persistence.
+        cur = conn.execute("PRAGMA table_info(conversations)")
+        conv_cols = {row[1] for row in cur.fetchall()}
+        if "model" not in conv_cols:
+            conn.execute("ALTER TABLE conversations ADD COLUMN model TEXT")
+
         # Backfill papers_fts from existing rows when the FTS index is empty
         # but the papers table has data (older DBs created before FTS5 existed).
         cur = conn.execute("SELECT COUNT(*) FROM papers")

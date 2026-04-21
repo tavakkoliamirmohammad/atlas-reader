@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from "react";
-import ReactMarkdown from "react-markdown";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import type { AnyModel, ModelChoice } from "@/lib/api";
+import { MermaidDiagram } from "./MermaidDiagram";
 
 type Props = {
   role: "user" | "assistant";
@@ -33,6 +34,30 @@ function isClaudeModel(m: string): m is ModelChoice {
 function pillStyle(model: AnyModel): React.CSSProperties {
   return isClaudeModel(model) ? CLAUDE_PILL_STYLE[model] : CODEX_PILL_STYLE;
 }
+
+/**
+ * Swap `<code class="language-mermaid">…</code>` code blocks for an inline
+ * MermaidDiagram render. Falls back to the default rendering for every
+ * other language. While the response is still streaming we skip Mermaid
+ * rendering — partial source fails to parse.
+ */
+function markdownComponents(isStreaming: boolean): Components {
+  return {
+    code({ className, children, ...props }) {
+      const isMermaid = typeof className === "string"
+        && className.indexOf("language-mermaid") !== -1;
+      if (isMermaid && !isStreaming) {
+        return <MermaidDiagram code={String(children).replace(/\n$/, "")} />;
+      }
+      return (
+        <code className={className} {...props}>
+          {children as ReactNode}
+        </code>
+      );
+    },
+  };
+}
+
 
 function pillLabel(model: AnyModel): string {
   if (isClaudeModel(model)) {
@@ -253,6 +278,7 @@ export function StreamingMessage({ role, content, isStreaming, model }: Props) {
             <ReactMarkdown
               remarkPlugins={[remarkGfm, remarkMath]}
               rehypePlugins={[rehypeKatex]}
+              components={markdownComponents(isStreaming)}
             >
               {isStreaming ? sanitizeStreamingMarkdown(content) : content}
             </ReactMarkdown>

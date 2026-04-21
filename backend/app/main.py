@@ -37,17 +37,21 @@ from fastapi import UploadFile, File, Form
 
 
 async def _daily_build_loop() -> None:
-    """Once an hour, ensure today's digest has been built.
+    """Once an hour, run three maintenance sweeps:
 
-    Runs in the background from app startup. Skips if today's build row
-    already has status='done', so restarting the backend repeatedly doesn't
-    re-hammer arXiv. Always uses rank=False to keep the check cheap — users
-    who want AI tiering trigger it explicitly from the UI.
+    1. Build today's digest if missing (arXiv fetch, no AI ranking).
+    2. Prune orphan PDFs — cached bytes with no `papers` row pointing at
+       them. Always-on; zero data-loss risk because we only delete files
+       nothing references.
+    3. If `ATLAS_CHAT_RETENTION_DAYS` is set, prune chat messages older
+       than that many days. Off by default — users keep their history
+       forever unless they opt in to retention.
     """
     import logging
     from datetime import date
     log = logging.getLogger("atlas.scheduler")
     while True:
+        # --- 1. Today's digest ---
         try:
             today = date.today().isoformat()
             with db.connect() as conn:
@@ -64,7 +68,32 @@ async def _daily_build_loop() -> None:
         except asyncio.CancelledError:
             raise
         except Exception:                             # noqa: BLE001
-            log.exception("scheduler tick error")
+            log.exception("scheduler: digest tick error")
+
+        # --- 2. Orphan-PDF sweep (always on) ---
+        try:
+            orphans = conversations.prune_orphan_pdfs()
+            if orphans:
+                log.info("scheduler: removed %d orphan PDF(s)", orphans)
+        except Exception:                             # noqa: BLE001
+            log.exception("scheduler: orphan-pdf sweep failed")
+
+        # --- 3. Chat retention (opt-in) ---
+        retention_env = os.environ.get("ATLAS_CHAT_RETENTION_DAYS")
+        if retention_env:
+            try:
+                days = int(retention_env)
+                if days > 0:
+                    deleted = conversations.prune_older_than(days)
+                    if deleted:
+                        log.info("scheduler: pruned %d chat message(s) older than %dd",
+                                 deleted, days)
+            except ValueError:
+                log.warning("scheduler: ATLAS_CHAT_RETENTION_DAYS=%r not an int; skipped",
+                            retention_env)
+            except Exception:                         # noqa: BLE001
+                log.exception("scheduler: chat retention sweep failed")
+
         try:
             await asyncio.sleep(3600)  # 1 hour
         except asyncio.CancelledError:
@@ -370,6 +399,13 @@ async def post_ask(
 async def get_conversations(arxiv_id: str) -> dict:
     rows = conversations.history(arxiv_id)
     return {"messages": [_row_to_dict(r) for r in rows]}
+
+
+@app.delete("/api/conversations/{arxiv_id}", status_code=204)
+async def delete_conversations(arxiv_id: str) -> Response:
+    """Clear all persisted chat messages for this paper."""
+    conversations.clear(arxiv_id)
+    return Response(status_code=204)
 
 
 def _build_row(date_str: str):

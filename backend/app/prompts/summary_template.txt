@@ -1,5 +1,11 @@
 You are an expert reviewer. Read the attached paper and produce a structured deep
-summary using exactly these 10 sections, in this order, with the headers shown:
+summary using exactly these 10 sections, in this order, with the headers shown.
+
+Hard rules:
+- Respond ONLY with the summary. No preamble, no meta-commentary,
+  no "I'll now read the paper", no tool narration, no closing remarks.
+- Start directly with `## 1. Background`. End after section 10.
+- If a section can't be filled from the paper, write "_(not discussed)_".
 
 ## 1. Background
 One paragraph: what subfield, what prior systems matter.

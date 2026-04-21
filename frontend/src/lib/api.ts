@@ -124,10 +124,23 @@ export async function streamAsk(
 export async function fetchConversations(arxivId: string): Promise<ChatMessage[]> {
   const r = await fetch(`/api/conversations/${arxivId}`);
   const body = await r.json();
-  return body.messages.map((m: { role: ChatMessage["role"]; content: string }) => ({
-    role: m.role,
-    content: m.content,
-  }));
+  return body.messages.map(
+    (m: { role: ChatMessage["role"]; content: string; model?: string | null }) => ({
+      role: m.role,
+      content: m.content,
+      model: (m.model as AnyModel) ?? undefined,
+    }),
+  );
+}
+
+
+export async function clearConversation(arxivId: string): Promise<void> {
+  const r = await fetch(`/api/conversations/${encodeURIComponent(arxivId)}`, {
+    method: "DELETE",
+  });
+  if (!r.ok && r.status !== 204) {
+    throw new Error(`clearConversation -> ${r.status}`);
+  }
 }
 
 export type HighlightColor = "yellow" | "coral" | "blue";

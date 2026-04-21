@@ -1,8 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { useMatch } from "react-router-dom";
+import { Trash2 } from "lucide-react";
 import {
   type ChatMessage,
   CODEX_MODEL_OPTIONS,
+  clearConversation,
+  fetchConversations,
   streamAsk,
   streamSummary,
 } from "@/lib/api";
@@ -132,12 +135,36 @@ export function ChatPanel() {
   const pinnedQuote = useUiStore((s) => s.pinnedQuote);
   const clearPinnedQuote = useUiStore((s) => s.clearPinnedQuote);
 
-  // Wipe ephemeral messages on paper switch.
+  // On paper switch, hydrate the chat from the persisted history for the
+  // new paper. The backend writes each turn after streaming completes, so
+  // closing the tab / switching papers / restarting the container all
+  // resume the thread where the user left off.
   useEffect(() => {
     if (!arxivId) return;
+    let cancelled = false;
     setMessages([]);
-    return () => { abortRef.current?.abort(); };
+    fetchConversations(arxivId)
+      .then((history) => { if (!cancelled) setMessages(history); })
+      .catch(() => { /* empty state is fine */ });
+    return () => {
+      cancelled = true;
+      abortRef.current?.abort();
+    };
   }, [arxivId]);
+
+  async function clearHistory() {
+    if (!arxivId || streaming) return;
+    const ok = window.confirm(
+      "Clear this paper's chat history? This can't be undone.",
+    );
+    if (!ok) return;
+    try {
+      await clearConversation(arxivId);
+      setMessages([]);
+    } catch {
+      // Fail-soft: keep local state as-is if the server rejected.
+    }
+  }
 
   // Clear the summarize elapsed-timer the moment streaming stops.
   useEffect(() => {
@@ -248,7 +275,23 @@ export function ChatPanel() {
     <div className="flex flex-col h-full">
       <Glossary arxivId={arxivId} />
       <div className="px-3 py-2.5 border-b border-white/5">
-        <div className="text-[10px] uppercase tracking-wider text-slate-500 mb-1.5">Quick actions</div>
+        <div className="flex items-center justify-between mb-1.5">
+          <div className="text-[10px] uppercase tracking-wider text-slate-500">
+            Quick actions
+          </div>
+          {messages.length > 0 && (
+            <button
+              type="button"
+              onClick={clearHistory}
+              disabled={streaming}
+              aria-label="Clear chat history for this paper"
+              title="Clear chat history"
+              className="inline-flex items-center gap-1 text-[10px] text-slate-500 hover:text-rose-300 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors"
+            >
+              <Trash2 size={11} /> Clear
+            </button>
+          )}
+        </div>
         <QuickActionChips
           onSummarize={summarize}
           onQuickAsk={quickAsk}

@@ -14,8 +14,8 @@ async def test_full_ai_round_trip(atlas_data_dir, fixtures_dir):
     All AI calls now route through `ai_backend.run_ai`; we dispatch fake
     outputs based on the `task` kwarg (rank/summarize/ask).
 
-    Chat is ephemeral (no DB writes from the asker), so /api/conversations
-    returns an empty list — expected.
+    The asker now persists the user/assistant turn after the stream finishes,
+    so /api/conversations should contain exactly those two rows.
     """
     db.init()
 
@@ -55,5 +55,13 @@ async def test_full_ai_round_trip(atlas_data_dir, fixtures_dir):
             assert f'data: {_json.dumps({"t": "answer"})}' in a.text
 
             conv = await c.get("/api/conversations/zz")
-            roles = [m["role"] for m in conv.json()["messages"]]
-            assert roles == []
+            msgs = conv.json()["messages"]
+            assert [m["role"] for m in msgs] == ["user", "assistant"]
+            assert msgs[0]["content"] == "Why?"
+            assert msgs[1]["content"] == "answer"
+
+            # Clearing drops the persisted thread.
+            r = await c.delete("/api/conversations/zz")
+            assert r.status_code == 204
+            conv2 = await c.get("/api/conversations/zz")
+            assert conv2.json()["messages"] == []
