@@ -317,7 +317,15 @@ export function ChatPanel() {
           }
         />
       </div>
-      <div className="flex-1 overflow-y-auto px-3 py-3 flex flex-col gap-2">
+      <div
+        className="flex-1 overflow-y-auto px-3 py-3 flex flex-col gap-2"
+        style={{
+          WebkitMaskImage:
+            "linear-gradient(to bottom, transparent 0, black 20px, black calc(100% - 12px), transparent 100%)",
+          maskImage:
+            "linear-gradient(to bottom, transparent 0, black 20px, black calc(100% - 12px), transparent 100%)",
+        }}
+      >
         {messages.length === 0 && !streaming && (
           <div className="text-xs text-slate-500 text-center mt-8">
             Tip:{" "}
