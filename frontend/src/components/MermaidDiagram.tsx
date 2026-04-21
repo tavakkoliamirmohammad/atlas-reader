@@ -20,6 +20,38 @@ function sanitizeSvg(svg: string): string {
   });
 }
 
+/**
+ * Auto-fix two common AI-output glitches that crash the mermaid parser:
+ *
+ * 1. Parentheses / braces in bracketed labels. Mermaid parses `A[foo()]` as
+ *    "id A, shape [foo, sub-shape (… )]", which errors. Wrapping the label in
+ *    quotes (`A["foo()"]`) resolves it.
+ * 2. Edge pipe-labels containing problematic chars. Same fix: wrap in quotes
+ *    when needed.
+ *
+ * Idempotent: labels already quoted are left alone.
+ */
+function sanitizeMermaidSource(src: string): string {
+  // A[...]  — node with square-bracket shape. Quote label if it has (){}.
+  // Skip lines that start with ``` to avoid touching fences (shouldn't see
+  // any here, but defense in depth).
+  const rewrite = (whole: string, id: string, body: string) => {
+    if (body.startsWith('"') && body.endsWith('"')) return whole;
+    if (!/[(){}]/.test(body)) return whole;
+    const escaped = body.replace(/"/g, '&quot;');
+    return `${id}["${escaped}"]`;
+  };
+  return src
+    // Rectangular:   A[label]
+    .replace(/(\b[A-Za-z0-9_]+)\[([^\[\]\n]+)\]/g, rewrite)
+    // Edge pipe label:  -->|label|  A    (only when problem chars are present)
+    .replace(/\|([^|\n]+)\|/g, (whole, body) => {
+      if (body.startsWith('"') && body.endsWith('"')) return whole;
+      if (!/[(){}]/.test(body)) return whole;
+      return `|"${body.replace(/"/g, "&quot;")}"|`;
+    });
+}
+
 function useMermaidSvg(code: string, appMode: string) {
   const id = useId().replace(/:/g, "_");
   const [svg, setSvg] = useState<string | null>(null);
@@ -38,8 +70,9 @@ function useMermaidSvg(code: string, appMode: string) {
     let cancelled = false;
     setError(null);
     (async () => {
+      const cleaned = sanitizeMermaidSource(code.trim());
       try {
-        const result = await mermaid.render(`m-${id}`, code.trim());
+        const result = await mermaid.render(`m-${id}`, cleaned);
         if (!cancelled) setSvg(sanitizeSvg(result.svg));
       } catch (e) {
         if (!cancelled) {

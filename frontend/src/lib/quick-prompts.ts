@@ -50,6 +50,12 @@ export const QUICK_PROMPTS: QuickPrompt[] = [
       "2. A single ```mermaid fenced block containing a `flowchart TD` or `flowchart LR` graph. " +
       "Nodes = concrete components/stages from the paper; edges carry short labels. " +
       "Aim for 6–15 nodes.\n\n" +
+      "Mermaid syntax rules (follow exactly, the diagram will NOT render otherwise):\n" +
+      "- Node labels go inside square brackets. If a label contains parentheses, " +
+      "braces, colons, semicolons, quotes or other punctuation, wrap it in double " +
+      "quotes: `A[\"spawn() entry\"]` — NOT `A[spawn() entry]`.\n" +
+      "- Edge labels between pipes (`-->|label|`) follow the same rule.\n" +
+      "- Keep labels short; prefer plain words over function signatures.\n\n" +
       "Do NOT narrate what you are doing, do NOT restate the question, do NOT add a closing. " +
       "Start with the paragraph, end after the closing ``` of the mermaid block.",
     icon: "◇",
