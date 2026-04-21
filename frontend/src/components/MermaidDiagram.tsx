@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import mermaid from "mermaid";
 import DOMPurify from "dompurify";
 import { Copy, Maximize2, X } from "lucide-react";
@@ -236,19 +237,22 @@ function ZoomedModal({ svg, onClose }: { svg: string; onClose: () => void }) {
   const isLight = typeof document !== "undefined"
     && document.documentElement.dataset.appMode === "light";
   const cardBg = isLight ? "#ffffff" : "#0b0f17";
-  const cardBorder = isLight ? "rgba(15, 23, 42, 0.1)" : "rgba(255, 255, 255, 0.1)";
 
-  return (
+  // Portal through document.body so the modal isn't trapped inside an
+  // ancestor with `backdrop-filter` / `transform` (which create a new
+  // containing block for position: fixed and kept the modal stuck inside
+  // the right panel).
+  return createPortal(
     <div
       role="dialog"
       aria-label="Zoomed Mermaid diagram"
-      className="fixed inset-0 z-50 mermaid-zoom-host"
+      className="fixed inset-0 z-[9999] mermaid-zoom-host"
       style={{ background: cardBg }}
       onClick={onClose}
     >
       <div
         className="absolute inset-0 overflow-hidden"
-        style={{ background: cardBg, borderTop: `1px solid ${cardBorder}` }}
+        style={{ background: cardBg }}
         onClick={(e) => e.stopPropagation()}
       >
         <button
@@ -283,6 +287,7 @@ function ZoomedModal({ svg, onClose }: { svg: string; onClose: () => void }) {
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
