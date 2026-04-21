@@ -93,6 +93,25 @@ body { background: #08080d; color: #e5e7ef; font-family: Inter, system-ui, sans-
   animation: atlas-fade-up-bottom .24s cubic-bezier(0.34, 1.56, 0.64, 1) both;
 }
 
+/* Mermaid SVG sizing. Don't force 100%×100% — that distorts mermaid's
+   internal text layout. Let the SVG render at natural size with a sensible
+   cap; the zoom modal then applies transform: scale() on top. */
+figure svg {
+  max-width: 100%;
+  height: auto;
+  display: block;
+}
+.mermaid-zoom-svg {
+  display: inline-block;
+  line-height: 0;   /* kill whitespace gaps */
+}
+.mermaid-zoom-svg svg {
+  max-width: min(85vw, 1100px);
+  max-height: min(80vh, 720px);
+  width: auto;
+  height: auto;
+}
+
 /* ---------- Light app mode ----------
    An opt-in override layer. `html[data-app-mode="light"]` re-skins the chrome
    without rewriting component styles: backgrounds go white, white/X

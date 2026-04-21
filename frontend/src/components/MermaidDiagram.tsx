@@ -178,12 +178,20 @@ function ZoomedModal({ svg, onClose }: { svg: string; onClose: () => void }) {
   const [scale, setScale] = useState(1);
   const [tx, setTx] = useState(0);
   const [ty, setTy] = useState(0);
+  const [dragging, setDragging] = useState(false);
   const dragRef = useRef<{ x: number; y: number; tx: number; ty: number } | null>(null);
 
+  // Esc closes from anywhere, regardless of focus. capture=true catches the
+  // event before any child handler can stop it.
   useEffect(() => {
-    function onKey(e: KeyboardEvent) { if (e.key === "Escape") onClose(); }
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        onClose();
+      }
+    }
+    document.addEventListener("keydown", onKey, true);
+    return () => document.removeEventListener("keydown", onKey, true);
   }, [onClose]);
 
   function onWheel(e: React.WheelEvent) {
@@ -194,6 +202,7 @@ function ZoomedModal({ svg, onClose }: { svg: string; onClose: () => void }) {
   function onPointerDown(e: React.PointerEvent) {
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
     dragRef.current = { x: e.clientX, y: e.clientY, tx, ty };
+    setDragging(true);
   }
   function onPointerMove(e: React.PointerEvent) {
     if (!dragRef.current) return;
@@ -203,6 +212,7 @@ function ZoomedModal({ svg, onClose }: { svg: string; onClose: () => void }) {
   function onPointerUp(e: React.PointerEvent) {
     (e.target as HTMLElement).releasePointerCapture(e.pointerId);
     dragRef.current = null;
+    setDragging(false);
   }
   function reset() { setScale(1); setTx(0); setTy(0); }
 
@@ -210,7 +220,7 @@ function ZoomedModal({ svg, onClose }: { svg: string; onClose: () => void }) {
     <div
       role="dialog"
       aria-label="Zoomed Mermaid diagram"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm mermaid-zoom-host"
       onClick={onClose}
     >
       <div
@@ -223,17 +233,18 @@ function ZoomedModal({ svg, onClose }: { svg: string; onClose: () => void }) {
       >
         <button
           type="button"
-          aria-label="Close"
+          aria-label="Close (Esc)"
+          title="Close (Esc)"
           onClick={onClose}
-          className="absolute top-3 right-3 z-10 inline-flex items-center justify-center w-7 h-7 rounded-full bg-white/[0.06] border border-white/10 text-slate-300 hover:text-slate-100 cursor-pointer"
+          className="absolute top-3 right-3 z-20 inline-flex items-center justify-center w-9 h-9 rounded-full bg-rose-500/20 border border-rose-400/40 text-rose-200 hover:bg-rose-500/40 hover:text-white cursor-pointer shadow-lg"
         >
-          <X size={14} />
+          <X size={16} />
         </button>
         <div className="absolute bottom-3 left-3 z-10 text-[10px] px-2 py-1 rounded bg-white/[0.06] border border-white/10 text-slate-400 pointer-events-none">
-          scroll to zoom · drag to pan · double-click to reset
+          scroll = zoom · drag = pan · dbl-click = reset · Esc = close
         </div>
         <div
-          className="w-full h-full cursor-grab active:cursor-grabbing"
+          className={`w-full h-full ${dragging ? "cursor-grabbing" : "cursor-grab"} select-none`}
           onWheel={onWheel}
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
@@ -245,10 +256,10 @@ function ZoomedModal({ svg, onClose }: { svg: string; onClose: () => void }) {
             style={{
               transform: `translate(${tx}px, ${ty}px) scale(${scale})`,
               transformOrigin: "center",
-              transition: dragRef.current ? "none" : "transform 80ms ease-out",
+              transition: dragging ? "none" : "transform 80ms ease-out",
             }}
           >
-            <SvgHost svg={svg} className="" />
+            <SvgHost svg={svg} className="mermaid-zoom-svg" />
           </div>
         </div>
       </div>
