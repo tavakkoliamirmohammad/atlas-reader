@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 
 type Props = { open: boolean; date: string; onDone: () => void };
 
@@ -19,14 +20,14 @@ export function BuildProgressOverlay({ open, date, onDone }: Props) {
 
   if (!open) return null;
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-40 flex flex-col items-center justify-center bg-black/80 backdrop-blur-md fade-up"
          role="status" aria-live="polite" aria-label="Building today's digest">
       <div className="mb-6 text-center">
         <div className="mb-2 text-lg font-medium text-zinc-100">Building today's digest</div>
-        <div className="text-xs text-zinc-400">arXiv fetch + AI tier ranking {"\u00b7"} a few seconds</div>
+        <div className="text-xs text-zinc-400">arXiv fetch + AI tier ranking {"·"} a few seconds</div>
       </div>
-      <ul className="w-[min(520px,90vw)] space-y-1 rounded-xl border border-white/10 bg-zinc-900/70 p-4 font-mono text-xs text-zinc-300">
+      <ul className="glass-elevated w-[min(520px,90vw)] space-y-1 rounded-xl p-4 font-mono text-xs text-zinc-300">
         {lines.map((line, i) => <li key={i} className="fade-up">{line}</li>)}
         {finalStatus === null && (
           <li className="flex items-center gap-2 text-zinc-500">
@@ -34,8 +35,9 @@ export function BuildProgressOverlay({ open, date, onDone }: Props) {
             working...
           </li>
         )}
-        {finalStatus === "failed" && <li className="text-rose-400">build failed {"\u2014"} see backend logs</li>}
+        {finalStatus === "failed" && <li className="text-rose-400">build failed {"—"} see backend logs</li>}
       </ul>
-    </div>
+    </div>,
+    document.body,
   );
 }

@@ -18,7 +18,7 @@ export function TopBar() {
   }, []);
 
   return (
-    <div className="relative z-10 flex items-center gap-3 px-4 h-[52px] border-b border-white/5 bg-[rgba(8,8,13,0.6)] backdrop-blur-xl">
+    <div className="topbar-glass relative z-10 flex items-center gap-3 px-4 h-[52px]">
       {/* Brand — icon + wordmark share a single flex row so items-center
           does the optical centering; no translate-y hacks. Font is set to a
           line-height that matches the tile so the text box doesn't add

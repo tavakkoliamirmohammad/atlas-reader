@@ -68,9 +68,12 @@ export const useUiStore = create<UiState>()(
       setDigestRange: (r) => set({ digestRange: r }),
       setBackend: (b) => set({ backend: b }),
       setCodexModel: (m) => set({ codexModel: m }),
-      setAppMode: (m) => set({ appMode: m }),
+      setAppMode: (m) => set({ appMode: m, readingMode: m }),
       toggleAppMode: () =>
-        set((s) => ({ appMode: s.appMode === "dark" ? "light" : "dark" })),
+        set((s) => {
+          const next: AppMode = s.appMode === "dark" ? "light" : "dark";
+          return { appMode: next, readingMode: next };
+        }),
       summarizeRequestId: 0,
       askRequest: null,
       pinnedQuote: null,

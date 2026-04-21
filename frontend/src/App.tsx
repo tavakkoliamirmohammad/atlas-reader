@@ -94,8 +94,11 @@ export default function App() {
         className="relative z-[1] grid min-h-[calc(100vh-58px)] text-slate-200 transition-[grid-template-columns] duration-300"
         style={{ gridTemplateColumns: `${leftW} 1fr ${rightW}` }}
       >
-        <aside className={["glass-panel relative border-r border-white/5 overflow-hidden transition-opacity",
-                           leftCollapsed ? "opacity-0 pointer-events-none" : ""].join(" ")}>
+        <aside
+          data-side="left"
+          className={["glass relative overflow-hidden transition-opacity",
+                      leftCollapsed ? "opacity-0 pointer-events-none" : ""].join(" ")}
+        >
           <PaperList />
         </aside>
 
@@ -111,8 +114,11 @@ export default function App() {
 
         {rightCollapsed && <ReopenTab side="right" />}
 
-        <aside className={["glass-panel relative border-l border-white/5 overflow-hidden transition-opacity flex flex-col",
-                           rightCollapsed ? "opacity-0 pointer-events-none" : ""].join(" ")}>
+        <aside
+          data-side="right"
+          className={["glass relative overflow-hidden transition-opacity flex flex-col",
+                      rightCollapsed ? "opacity-0 pointer-events-none" : ""].join(" ")}
+        >
           {!rightCollapsed && <RightPanelResizer />}
           <RightPanel />
         </aside>

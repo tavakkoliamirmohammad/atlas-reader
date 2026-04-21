@@ -14,8 +14,9 @@ export function ReopenTab({ side }: Props) {
       className={[
         "absolute top-1/2 -translate-y-1/2 z-20",
         "w-[18px] h-[60px] flex items-center justify-center",
-        "bg-[rgba(18,18,28,0.85)] backdrop-blur-md border border-white/10 text-slate-400",
-        "hover:text-white hover:border-[color:var(--ac1-mid)]",
+        "bg-white/[0.06] backdrop-blur-md border border-white/10 text-slate-300",
+        "hover:bg-white/[0.12] hover:text-white hover:border-[color:var(--ac1-mid)]",
+        "transition-colors",
         side === "left" ? "left-0 rounded-r-lg" : "right-0 rounded-l-lg",
       ].join(" ")}
     >

@@ -60,7 +60,7 @@ function GenericModelPicker<T extends string>({
         onClick={() => setOpen((v) => !v)}
         aria-label="Model"
         aria-expanded={open}
-        className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-[11px] text-slate-300 bg-white/[0.04] border border-white/5 hover:border-[color:var(--ac1-mid)] hover:text-white transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+        className="model-pill inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-[11px] hover:border-[color:var(--ac1-mid)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
       >
         <span className="w-1.5 h-1.5 rounded-full" style={{ background: "var(--ac1)" }} />
         <span>{meta[model].label}</span>
@@ -342,10 +342,10 @@ export function ChatPanel() {
       <div className="px-3 pb-3 pt-2">
         <div
           className={[
-            "flex flex-col gap-2 bg-white/[0.04] border rounded-2xl px-3 pt-3 pb-2",
-            "transition-colors duration-200",
-            "border-white/5 focus-within:border-[color:var(--ac1-mid)]",
-            "focus-within:shadow-[0_0_24px_-8px_var(--ac1-mid)]",
+            "glass-subtle flex flex-col gap-2 rounded-2xl px-3 pt-3 pb-2",
+            "transition-[border-color,box-shadow] duration-200",
+            "focus-within:border-[color:var(--ac1-mid)]",
+            "focus-within:shadow-[inset_0_1px_0_var(--glass-rim),0_0_24px_-8px_var(--ac1-mid)]",
           ].join(" ")}
         >
           {pinnedQuote && (

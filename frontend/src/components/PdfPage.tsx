@@ -86,14 +86,14 @@ type Props = {
   defaultHighlightColor?: HighlightColor;
 };
 
-// Soft radial-gradient backdrops — slightly tinted center, fading to ink
+// Reading mode tints the *card surround only* — the PDF page itself keeps
+// its own intrinsic paper color. Translucent so the app backdrop (glass
+// mesh) reads through cleanly; without this, in app-light + reading-dark
+// you get a hard dark rectangle framing the page. Subtle is key here.
 const MODE_BG: Record<ReadingMode, string> = {
-  light:
-    "radial-gradient(ellipse 90% 70% at 50% 30%, rgba(244,247,252,1) 0%, rgba(232,236,244,1) 55%, rgba(216,222,232,1) 100%)",
-  sepia:
-    "radial-gradient(ellipse 90% 70% at 50% 30%, rgba(248,239,217,1) 0%, rgba(241,231,205,1) 55%, rgba(228,217,189,1) 100%)",
-  dark:
-    "radial-gradient(ellipse 90% 70% at 50% 30%, rgba(28,30,38,1) 0%, rgba(20,22,30,1) 55%, rgba(12,13,18,1) 100%)",
+  light: "rgba(244, 247, 252, 0.35)",
+  sepia: "rgba(248, 239, 217, 0.45)",
+  dark:  "rgba(18, 22, 32, 0.45)",
 };
 
 const HIDE_AFTER_MS = 1500;
@@ -237,34 +237,11 @@ export function PdfPage({
       style={{
         background: MODE_BG[mode],
         transition: "background .35s ease",
-        // Subtle outer ring of accent color glow
-        boxShadow:
-          "0 0 0 1px var(--ac1-mid), 0 24px 60px -20px rgba(0,0,0,0.55), 0 8px 20px -10px rgba(0,0,0,0.45)",
+        // Accent ring only — drop shadows cast a dark halo onto the aurora
+        // backdrop which reads as a heavy black smear under the card.
+        boxShadow: "0 0 0 1px var(--ac1-mid)",
       }}
     >
-      {/* Page-stack illusion: two faint shadows behind the viewport suggest stacked pages */}
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-x-6 top-3 bottom-6 rounded-xl"
-        style={{
-          background: "transparent",
-          boxShadow:
-            "0 14px 28px -14px rgba(0,0,0,0.45), 0 28px 56px -28px rgba(0,0,0,0.35)",
-          transform: "translateY(6px) scale(0.985)",
-          opacity: 0.6,
-        }}
-      />
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-x-4 top-2 bottom-4 rounded-xl"
-        style={{
-          background: "transparent",
-          boxShadow:
-            "0 10px 20px -10px rgba(0,0,0,0.35), 0 20px 40px -20px rgba(0,0,0,0.25)",
-          transform: "translateY(3px) scale(0.992)",
-          opacity: 0.5,
-        }}
-      />
 
       {/* Reading-progress rail — sits on the left edge of the card and now
           tracks real scroll position + page count + outline sections. */}

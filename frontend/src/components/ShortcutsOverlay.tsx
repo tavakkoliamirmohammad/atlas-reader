@@ -1,10 +1,11 @@
+import { createPortal } from "react-dom";
 import { SHORTCUTS } from "@/lib/keyboard";
 
 type Props = { open: boolean; onClose: () => void };
 
 export function ShortcutsOverlay({ open, onClose }: Props) {
   if (!open) return null;
-  return (
+  return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
       onClick={onClose}
@@ -13,7 +14,7 @@ export function ShortcutsOverlay({ open, onClose }: Props) {
       aria-label="Keyboard shortcuts"
     >
       <div
-        className="w-[min(520px,90vw)] rounded-2xl border border-white/10 bg-zinc-900/90 p-6 shadow-2xl"
+        className="glass-elevated w-[min(520px,90vw)] rounded-2xl p-6"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-4 flex items-center justify-between">
@@ -29,6 +30,7 @@ export function ShortcutsOverlay({ open, onClose }: Props) {
           ))}
         </ul>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

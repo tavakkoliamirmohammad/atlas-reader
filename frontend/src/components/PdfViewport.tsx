@@ -785,7 +785,7 @@ function LoadingCard({ phase }: { phase: LoadPhase }) {
 
   return (
     <div
-      className="absolute inset-x-0 bottom-0 flex justify-center pointer-events-none px-6 pb-6 fade-up-bottom"
+      className="absolute inset-x-0 bottom-0 z-10 flex justify-center pointer-events-none px-6 pb-6 fade-up-bottom"
       aria-live="polite"
     >
       <div

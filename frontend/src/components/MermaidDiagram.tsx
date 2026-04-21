@@ -260,7 +260,7 @@ function ZoomedModal({ svg, onClose }: { svg: string; onClose: () => void }) {
           aria-label="Close (Esc)"
           title="Close (Esc)"
           onClick={onClose}
-          className="absolute top-3 right-3 z-20 inline-flex items-center justify-center w-9 h-9 rounded-full bg-rose-500/20 border border-rose-400/40 text-rose-200 hover:bg-rose-500/40 hover:text-white cursor-pointer shadow-lg"
+          className="absolute top-3 right-3 z-20 inline-flex items-center justify-center w-9 h-9 rounded-full bg-rose-600 border border-rose-300 text-white hover:bg-rose-700 cursor-pointer shadow-lg"
         >
           <X size={16} />
         </button>

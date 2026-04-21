@@ -222,14 +222,8 @@ export function PaperList() {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="px-4 py-3 border-b border-white/5">
+      <div className="px-4 py-3">
         <div className="text-[11px] uppercase tracking-wider text-slate-500">Today {"\u00b7"} {new Date().toLocaleDateString(undefined, { month: "short", day: "numeric" })}</div>
-        <div className="text-[15px] font-semibold mt-0.5 text-slate-100 flex items-center gap-2">
-          Daily digest
-          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-white/5 text-slate-400 font-medium">
-            {hasTiers ? "AI-ranked" : "Newest first"}
-          </span>
-        </div>
       </div>
       <UrlBar onSubmit={(id) => navigate(`/reader/${id}`)} />
       <div className="px-2 pb-2 relative">
@@ -264,9 +258,9 @@ export function PaperList() {
           style={{
             left: ink?.left ?? 0,
             width: ink?.width ?? 0,
-            background: "var(--ac1-soft)",
+            background: "var(--glass-bg-selected)",
             boxShadow:
-              "0 0 0 1px var(--ac1-mid), 0 8px 20px -10px var(--ac1-mid)",
+              "inset 0 1px 0 var(--glass-rim), inset 0 0 0 1px var(--ac1-mid), 0 8px 20px -10px var(--ac1-mid)",
             transition:
               "left 260ms cubic-bezier(0.34, 1.56, 0.64, 1), width 260ms cubic-bezier(0.34, 1.56, 0.64, 1), opacity 160ms ease-out",
             opacity: ink ? 1 : 0,

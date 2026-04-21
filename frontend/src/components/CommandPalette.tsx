@@ -1,5 +1,6 @@
 import { Command } from "cmdk";
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useMatch, useNavigate } from "react-router-dom";
 import { useUiStore, type ReadingMode } from "@/stores/ui-store";
 import { PALETTES } from "@/lib/theme";
@@ -47,7 +48,7 @@ export function CommandPalette({ open, onClose, onSearch, onShowShortcuts }: Pro
 
   if (!open) return null;
 
-  return (
+  return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 backdrop-blur-sm pt-[15vh]"
       onClick={onClose}
@@ -55,7 +56,7 @@ export function CommandPalette({ open, onClose, onSearch, onShowShortcuts }: Pro
       aria-modal="true"
     >
       <div
-        className="w-[min(640px,92vw)] overflow-hidden rounded-2xl border border-white/10 bg-zinc-900/95 shadow-2xl"
+        className="glass-elevated w-[min(640px,92vw)] overflow-hidden rounded-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         <Command label="Command palette" className="flex flex-col">
@@ -186,6 +187,7 @@ export function CommandPalette({ open, onClose, onSearch, onShowShortcuts }: Pro
           </Command.List>
         </Command>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

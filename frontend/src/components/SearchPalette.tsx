@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import { searchPapers, type SearchResult } from "@/lib/api";
 
@@ -140,7 +141,7 @@ export function SearchPalette({ open, onClose }: Props) {
     }
   }
 
-  return (
+  return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 backdrop-blur-sm pt-[12vh]"
       onClick={onClose}
@@ -150,7 +151,7 @@ export function SearchPalette({ open, onClose }: Props) {
       onKeyDown={onKeyDown}
     >
       <div
-        className="w-[min(720px,94vw)] overflow-hidden rounded-2xl border border-white/10 bg-zinc-900/95 shadow-2xl"
+        className="glass-elevated w-[min(720px,94vw)] overflow-hidden rounded-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center gap-2 border-b border-white/10 px-4 py-3">
@@ -245,6 +246,7 @@ export function SearchPalette({ open, onClose }: Props) {
           </span>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

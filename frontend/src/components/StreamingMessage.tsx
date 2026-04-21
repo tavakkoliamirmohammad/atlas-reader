@@ -13,26 +13,16 @@ type Props = {
   model?: AnyModel;
 };
 
-// Per-Claude-model pill colors; Codex models share one palette below since
-// they're all the same provider.
-const CLAUDE_PILL_STYLE: Record<ModelChoice, React.CSSProperties> = {
-  opus:   { color: "#c4b5fd", background: "rgba(139,92,246,0.12)", border: "1px solid rgba(139,92,246,0.28)" },
-  sonnet: { color: "#67e8f9", background: "rgba(34,211,238,0.12)", border: "1px solid rgba(34,211,238,0.28)" },
-  haiku:  { color: "#fcd34d", background: "rgba(251,191,36,0.12)", border: "1px solid rgba(251,191,36,0.28)" },
-};
-
-const CODEX_PILL_STYLE: React.CSSProperties = {
-  color: "#86efac",
-  background: "rgba(34,197,94,0.12)",
-  border: "1px solid rgba(34,197,94,0.28)",
-};
-
 function isClaudeModel(m: string): m is ModelChoice {
   return m === "opus" || m === "sonnet" || m === "haiku";
 }
 
-function pillStyle(model: AnyModel): React.CSSProperties {
-  return isClaudeModel(model) ? CLAUDE_PILL_STYLE[model] : CODEX_PILL_STYLE;
+// Per-model pill class. Colors are defined in globals.css so they can flip
+// per app mode — the pastel tints that read on a dark backdrop turn into
+// unreadable tonal blurs on light, so each palette has two variants.
+function pillClass(model: AnyModel): string {
+  if (isClaudeModel(model)) return `msg-pill msg-pill-${model}`;
+  return "msg-pill msg-pill-codex";
 }
 
 /**
@@ -245,14 +235,12 @@ export function StreamingMessage({ role, content, isStreaming, model }: Props) {
         {!isUser && model && (
           <div className="mb-1.5">
             <span
-              className="inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider"
-              style={pillStyle(model)}
+              className={`${pillClass(model)} inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider`}
               title={`Response from ${pillLabel(model)}`}
             >
               <span
                 aria-hidden
-                className="inline-block w-1.5 h-1.5 rounded-full"
-                style={{ background: pillStyle(model).color }}
+                className="msg-pill-dot inline-block w-1.5 h-1.5 rounded-full"
               />
               {pillLabel(model)}
             </span>

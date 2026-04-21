@@ -24,6 +24,30 @@
   --surface-overlay-border: rgba(255, 255, 255, 0.10);
   --surface-overlay-text:   #e2e8f0;
   --surface-overlay-muted:  #94a3b8;
+
+  /* ---------- Glass tokens (dark) ----------
+     Thin dark tint (0.28) reads as "a tinted lens" on the bright mesh.
+     Hover bumps for contrast on interaction. Elevated floats keep a
+     heavy tint since they occlude content. */
+  --glass-bg:           rgba(15, 23, 42, 0.28);
+  --glass-bg-elevated:  rgba(14, 18, 28, 0.82);
+  --glass-bg-subtle:    rgba(15, 23, 42, 0.14);
+  --glass-bg-hover:     rgba(22, 28, 44, 0.42);
+  --glass-bg-selected:  rgba(34, 211, 238, 0.18);
+  --glass-border:       rgba(255, 255, 255, 0.10);
+  --glass-border-strong:rgba(255, 255, 255, 0.16);
+  --glass-border-hover: rgba(255, 255, 255, 0.18);
+  --glass-rim:          rgba(255, 255, 255, 0.16);
+  --glass-shadow:       0 12px 40px -12px rgba(0, 0, 0, 0.55),
+                        0 2px 8px -2px rgba(0, 0, 0, 0.35);
+  --glass-shadow-elevated: 0 24px 64px -12px rgba(0, 0, 0, 0.65),
+                           0 8px 24px -8px rgba(0, 0, 0, 0.45);
+  --glass-glow-accent:  0 0 0 1px var(--ac1-soft),
+                        0 8px 32px -12px var(--ac1-mid);
+  --glass-blur:         44px;
+  --glass-blur-sm:      18px;
+  --glass-blur-lg:      60px;
+  --glass-saturate:     150%;
 }
 
 html[data-app-mode="light"] {
@@ -31,10 +55,45 @@ html[data-app-mode="light"] {
   --surface-overlay-border: rgba(15, 23, 42, 0.10);
   --surface-overlay-text:   #0f172a;
   --surface-overlay-muted:  #64748b;
+
+  /* Glass tokens (light). Lower opacity than most "safe" light-glass
+     recipes — 0.55 — keeps enough color visible through the frost. We
+     compensate for contrast loss with a darker border and a body text
+     color that's never lighter than slate-900 on glass surfaces. */
+  --glass-bg:           rgba(255, 255, 255, 0.58);
+  --glass-bg-elevated:  rgba(255, 255, 255, 0.85);
+  --glass-bg-subtle:    rgba(255, 255, 255, 0.38);
+  --glass-bg-hover:     rgba(255, 255, 255, 0.72);
+  --glass-bg-selected:  rgba(34, 211, 238, 0.20);
+  --glass-border:       rgba(15, 23, 42, 0.10);
+  --glass-border-strong:rgba(15, 23, 42, 0.18);
+  --glass-border-hover: rgba(15, 23, 42, 0.18);
+  --glass-rim:          rgba(255, 255, 255, 0.95);
+  --glass-shadow:       0 8px 28px -10px rgba(15, 23, 42, 0.18),
+                        0 1px 3px -1px rgba(15, 23, 42, 0.08);
+  --glass-shadow-elevated: 0 18px 52px -12px rgba(15, 23, 42, 0.28),
+                           0 4px 14px -4px rgba(15, 23, 42, 0.12);
+  --glass-glow-accent:  0 0 0 1px var(--ac1-mid),
+                        0 6px 24px -8px rgba(34, 211, 238, 0.28);
+  --glass-blur:         44px;
+  --glass-saturate:     150%;
 }
 
 html, body, #root { height: 100%; overflow: hidden; }
 body { background: #08080d; color: #e5e7ef; font-family: Inter, system-ui, sans-serif; }
+
+/* Drop the default chromium-blue focus box on interactive controls — it's
+   a bright rectangle that clashes with the glass aesthetic. Keyboard users
+   still get an a11y-visible ring via :focus-visible, tinted in the accent
+   color. Mouse/touch focus gets nothing (matching native Mac behavior). */
+:where(button, [role="button"], [role="tab"], [role="option"], [role="radio"], a, summary) {
+  outline: none;
+}
+:where(button, [role="button"], [role="tab"], [role="option"], [role="radio"], a, summary):focus-visible {
+  outline: 2px solid var(--ac1-mid);
+  outline-offset: 2px;
+  border-radius: 8px;
+}
 
 /* ---------- Slim, dark, subtle scrollbars (site-wide) ----------
    Webkit browsers get a 6px-wide rail with a translucent thumb that
@@ -62,7 +121,7 @@ body { background: #08080d; color: #e5e7ef; font-family: Inter, system-ui, sans-
 }
 
 .aurora-bg {
-  position: absolute; inset: -40%; pointer-events: none; opacity: 0.35;
+  position: absolute; inset: -40%; pointer-events: none; opacity: 0.55;
   background:
     radial-gradient(60% 50% at 18% 20%, var(--ac1) 0%, transparent 60%),
     radial-gradient(50% 40% at 85% 12%, var(--ac2) 0%, transparent 65%),
@@ -71,23 +130,334 @@ body { background: #08080d; color: #e5e7ef; font-family: Inter, system-ui, sans-
   animation: drift 20s ease-in-out infinite alternate;
   transition: background .35s ease;
 }
+html[data-app-mode="light"] .aurora-bg { opacity: 0.32; filter: blur(90px); }
 
-.glass-panel {
-  background: rgba(18, 18, 28, 0.55);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-}
-
+/* ---------- Stage backdrop ----------
+   The deep canvas that glass filters through. Saturated color-wells
+   placed UNDER the sidebars (15%/85% horizontal) so the glass has
+   something bright to tint. Flat navy + 18px blur just reads as "grey",
+   which is what kills cheap glass. */
 .stage-shell {
   position: relative; height: 100vh; overflow: hidden;
-  background: #08080d;
   display: flex; flex-direction: column;
+  /* The mesh: blooms anchored AT each corner (0/0, 100/0, 100/100, 0/100)
+     + a soft center fill. Previously the blooms were inset to 18%/82%,
+     which left the outer edges uncovered — the #0d1326 base showed as a
+     dark vignette/frame around the bright interior. Corner-anchored
+     blooms paint all the way to every edge; a lower-alpha center bloom
+     fills the middle where the four corner gradients taper off. All-cool
+     palette (cyan/emerald/indigo/sky) keeps hue transitions smooth. */
+  background:
+    radial-gradient(90% 80% at 0% 0%,     rgba(34,211,238,0.38), transparent 75%),
+    radial-gradient(90% 80% at 100% 0%,   rgba(16,185,129,0.34), transparent 75%),
+    radial-gradient(90% 80% at 100% 100%, rgba(99,102,241,0.38), transparent 75%),
+    radial-gradient(90% 80% at 0% 100%,   rgba(56,189,248,0.28), transparent 75%),
+    radial-gradient(80% 70% at 50% 50%,   rgba(99,102,241,0.18), transparent 80%),
+    #0f1a33;
+}
+.stage-shell::before {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  z-index: 0;
+  opacity: 0.05;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 0.4 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+}
+html[data-app-mode="light"] .stage-shell {
+  background:
+    radial-gradient(90% 80% at 0% 0%,     rgba(14, 165, 233, 0.52), transparent 75%),
+    radial-gradient(90% 80% at 100% 0%,   rgba(16, 185, 129, 0.46), transparent 75%),
+    radial-gradient(90% 80% at 100% 100%, rgba(99, 102, 241, 0.48), transparent 75%),
+    radial-gradient(90% 80% at 0% 100%,   rgba(56, 189, 248, 0.44), transparent 75%),
+    radial-gradient(80% 70% at 50% 50%,   rgba(99, 102, 241, 0.14), transparent 80%),
+    #eef2fb;
+}
+html[data-app-mode="light"] .stage-shell::before {
+  opacity: 0.08;
+  mix-blend-mode: multiply;
+}
+
+/* ---------- Canonical glass utilities ----------
+   `.glass`            - chrome surfaces (sidebars, footer)
+   `.glass-elevated`   - floating surfaces (palettes, modals, dropdowns)
+   `.glass-subtle`     - nested cards INSIDE another glass layer.
+                         No backdrop-filter (avoid compounding blur cost);
+                         tint only.
+   `.glass-interactive`- hover/active treatment for clickable glass. */
+/* Sidebar/chrome glass has no visible outer border and no rim-light —
+   they're wall-to-wall with the topbar and rim stacking creates a visible
+   seam at the boundary. Only the outer shadow separates glass from content. */
+.glass {
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  box-shadow: var(--glass-shadow);
+}
+/* Elevated floats (palettes/modals) get a thin border because they sit
+   ABOVE content, need a defined edge. */
+.glass-elevated {
+  background: var(--glass-bg-elevated);
+  backdrop-filter: blur(var(--glass-blur-lg)) saturate(var(--glass-saturate));
+  border: 1px solid var(--glass-border);
+  box-shadow:
+    inset 0 1px 0 var(--glass-rim),
+    var(--glass-shadow-elevated);
+}
+.glass-subtle {
+  background: var(--glass-bg-subtle);
+  box-shadow: inset 0 1px 0 var(--glass-rim);
+}
+/* Light mode: the strong white rim-light (--glass-rim: rgba(255,255,255,0.95))
+   that gives dark-mode glass its polished edge reads as a hard horizontal
+   break at the top of nested glass cards against a bright stage. Drop the
+   rim to a soft hairline so the edge still exists but doesn't slice the
+   surface in two. */
+html[data-app-mode="light"] .glass-subtle {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35);
+}
+
+/* Model picker pill — theme-aware text/background so the current model
+   label stays legible in both app modes. In dark mode the old
+   `text-slate-300 bg-white/[0.04]` was fine; in light mode that lands as
+   near-white on near-white. CSS vars let us flip both tokens cleanly. */
+.model-pill {
+  color: #cbd5e1;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+.model-pill:hover { color: #ffffff; }
+html[data-app-mode="light"] .model-pill {
+  color: #334155;
+  background: rgba(15, 23, 42, 0.04);
+  border-color: rgba(15, 23, 42, 0.12);
+}
+html[data-app-mode="light"] .model-pill:hover { color: #0f172a; }
+
+/* Assistant-message model pills. The dot inherits the pill's text color so
+   it stays visually linked. Each model gets its own hue; light mode uses a
+   darker tint+text combo so the pill reads on bright backdrops instead of
+   bleeding into them. */
+.msg-pill-dot { background: currentColor; }
+.msg-pill-opus   { color: #c4b5fd; background: rgba(139, 92, 246, 0.12); border: 1px solid rgba(139, 92, 246, 0.28); }
+.msg-pill-sonnet { color: #67e8f9; background: rgba(34, 211, 238, 0.12); border: 1px solid rgba(34, 211, 238, 0.28); }
+.msg-pill-haiku  { color: #fcd34d; background: rgba(251, 191, 36, 0.12); border: 1px solid rgba(251, 191, 36, 0.28); }
+.msg-pill-codex  { color: #86efac; background: rgba(34, 197, 94, 0.12);  border: 1px solid rgba(34, 197, 94, 0.28);  }
+html[data-app-mode="light"] .msg-pill-opus   { color: #6d28d9; background: rgba(139, 92, 246, 0.14); border-color: rgba(139, 92, 246, 0.40); }
+html[data-app-mode="light"] .msg-pill-sonnet { color: #0e7490; background: rgba(34, 211, 238, 0.16); border-color: rgba(34, 211, 238, 0.45); }
+html[data-app-mode="light"] .msg-pill-haiku  { color: #b45309; background: rgba(251, 191, 36, 0.18); border-color: rgba(251, 191, 36, 0.45); }
+html[data-app-mode="light"] .msg-pill-codex  { color: #15803d; background: rgba(34, 197, 94, 0.14);  border-color: rgba(34, 197, 94, 0.40);  }
+
+/* Placeholder/muted chrome text on the aurora stage. slate-500 (#64748b)
+   blends into the saturated mesh — the backdrop's warm tints bleed through
+   and the text reads as a muted pink smear. A step brighter (slate-400 /
+   ~#94a3b8) keeps the muted hierarchy while staying legible. */
+.stage-shell input::placeholder,
+.stage-shell textarea::placeholder {
+  color: #94a3b8;
+}
+html[data-app-mode="light"] .stage-shell input::placeholder,
+html[data-app-mode="light"] .stage-shell textarea::placeholder {
+  color: #64748b;
+}
+.glass-interactive {
+  transition: background 180ms ease, box-shadow 220ms ease, border-color 180ms ease;
+}
+.glass-interactive:hover {
+  background: var(--glass-bg-hover);
+  border-color: var(--glass-border-hover);
+  box-shadow:
+    inset 0 1px 0 var(--glass-rim),
+    var(--glass-shadow),
+    0 0 0 1px var(--ac1-soft),
+    0 8px 32px -12px var(--ac1-mid);
+}
+.glass-interactive:active {
+  background: var(--glass-bg);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.04),
+    0 2px 6px -2px rgba(0,0,0,0.40);
+}
+.glass-selected {
+  background: var(--glass-bg-selected);
+  border-color: var(--ac1-mid);
+  box-shadow:
+    inset 0 0 0 1px var(--ac1-mid),
+    inset 0 1px 0 var(--glass-rim),
+    0 0 20px -8px var(--ac1-mid);
+}
+
+/* ---------- Aside glass: feather inner edge + top ----------
+   A flat tinted aside against a saturated, non-tinted main area cuts a
+   visible rectangular seam. We fix it by moving the glass tint + blur off
+   the aside itself and onto a ::before layer we can `mask-image`-feather
+   toward the main-content edge and toward the transparent topbar above.
+   `isolation: isolate` pins ::before's negative z-index inside the aside
+   so it stays behind the aside's own children without leaking outside. */
+.stage-shell aside.glass {
+  background: transparent;
+  backdrop-filter: none;
+  box-shadow: none;
+  isolation: isolate;
+}
+.stage-shell aside.glass::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  pointer-events: none;
+  z-index: -1;
+}
+/* Horizontal feather now spans the FULL panel width — tint ramps smoothly
+   from 0 at the inner edge (meeting main) to full at the outer edge. The
+   previous fixed 96px feather left a visible "edge" where opacity locked
+   to full, reading as a subtle shadow band. A continuous gradient means
+   the tint is never uniformly applied across any vertical slice, so no
+   boundary is visible. Top/bottom feathers still localised (56/48px) so
+   the panels smoothly emerge from topbar and footer zones. */
+.stage-shell aside.glass[data-side="left"]::before {
+  -webkit-mask-image:
+    linear-gradient(to left,
+      rgba(0,0,0,0) 0%,
+      rgba(0,0,0,1) 100%),
+    linear-gradient(to bottom,
+      rgba(0,0,0,0) 0%,
+      rgba(0,0,0,1) 56px,
+      rgba(0,0,0,1) calc(100% - 48px),
+      rgba(0,0,0,0) 100%);
+  -webkit-mask-composite: source-in;
+  mask-image:
+    linear-gradient(to left,
+      rgba(0,0,0,0) 0%,
+      rgba(0,0,0,1) 100%),
+    linear-gradient(to bottom,
+      rgba(0,0,0,0) 0%,
+      rgba(0,0,0,1) 56px,
+      rgba(0,0,0,1) calc(100% - 48px),
+      rgba(0,0,0,0) 100%);
+  mask-composite: intersect;
+}
+.stage-shell aside.glass[data-side="right"]::before {
+  -webkit-mask-image:
+    linear-gradient(to right,
+      rgba(0,0,0,0) 0%,
+      rgba(0,0,0,1) 100%),
+    linear-gradient(to bottom,
+      rgba(0,0,0,0) 0%,
+      rgba(0,0,0,1) 56px,
+      rgba(0,0,0,1) calc(100% - 48px),
+      rgba(0,0,0,0) 100%);
+  -webkit-mask-composite: source-in;
+  mask-image:
+    linear-gradient(to right,
+      rgba(0,0,0,0) 0%,
+      rgba(0,0,0,1) 100%),
+    linear-gradient(to bottom,
+      rgba(0,0,0,0) 0%,
+      rgba(0,0,0,1) 56px,
+      rgba(0,0,0,1) calc(100% - 48px),
+      rgba(0,0,0,0) 100%);
+  mask-composite: intersect;
+}
+
+/* ---------- Footer glass: feather top edge ----------
+   Footer is a thin horizontal strip beneath the asides. A flat .glass
+   tint meeting the aside's feathered bottom created a visible horizontal
+   boundary because the aside's tint ramps to 0 while the footer's starts
+   at full. Move the tint to ::before and feather the top so both surfaces
+   fade toward their meeting line — the seam disappears. */
+.stage-shell footer.glass {
+  background: transparent;
+  backdrop-filter: none;
+  box-shadow: none;
+  isolation: isolate;
+  position: relative;
+}
+.stage-shell footer.glass::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  pointer-events: none;
+  z-index: -1;
+  -webkit-mask-image: linear-gradient(to bottom,
+    rgba(0,0,0,0) 0%,
+    rgba(0,0,0,1) 100%);
+  mask-image: linear-gradient(to bottom,
+    rgba(0,0,0,0) 0%,
+    rgba(0,0,0,1) 100%);
+}
+
+/* Back-compat alias — lets existing .glass-panel consumers migrate lazily. */
+.glass-panel {
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  border: 1px solid var(--glass-border);
+  box-shadow:
+    inset 0 1px 0 var(--glass-rim),
+    var(--glass-shadow);
+}
+
+/* ---------- TopBar hero glass ----------
+   Gradient hairline underneath (strongest in the middle, fades to zero
+   at the corners) + rim-light — this is the "premium" detail.*/
+/* Topbar intentionally has no tint + no backdrop-filter. The tint/blur
+   tier of the asides below doesn't sample the same averaged color as the
+   topbar's own tint — that mismatch painted a visible horizontal seam at
+   the boundary. Leaving the topbar transparent means the colorful backdrop
+   reads through uniformly from the very top, and only the asides show the
+   frosted treatment. Controls stay readable because text-slate-* is high
+   enough contrast against the saturated gradient. */
+.topbar-glass {
+  position: relative;
+  background: transparent;
+}
+
+/* ---------- Accessibility / fallbacks ----------
+   Users who opt out of transparency (OS-level or Firefox about:config)
+   get opaque panels. `backdrop-filter` unsupported → same fallback. */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  :root {
+    --glass-bg: rgba(14, 18, 28, 0.95);
+    --glass-bg-elevated: rgba(18, 22, 34, 0.98);
+    --glass-bg-subtle: rgba(14, 18, 28, 0.85);
+  }
+  html[data-app-mode="light"] {
+    --glass-bg: rgba(255, 255, 255, 0.96);
+    --glass-bg-elevated: rgba(255, 255, 255, 0.99);
+    --glass-bg-subtle: rgba(255, 255, 255, 0.90);
+  }
+}
+@media (prefers-reduced-transparency: reduce) {
+  :root {
+    --glass-bg: #0e121c;
+    --glass-bg-elevated: #141826;
+    --glass-bg-subtle: #0e121c;
+    --glass-blur: 0px;
+    --glass-blur-lg: 0px;
+    --glass-blur-sm: 0px;
+  }
+  html[data-app-mode="light"] {
+    --glass-bg: #ffffff;
+    --glass-bg-elevated: #ffffff;
+    --glass-bg-subtle: #ffffff;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .aurora-bg { animation: none; }
 }
 
 /* Loading / toast card that slides up from the bottom edge. */
 @keyframes atlas-fade-up-bottom {
   from { opacity: 0; transform: translateY(12px); }
   to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Aurora drift — slowly rebalances the three color-wells so the backdrop
+   behind glass isn't static. 20s loop, alternating — barely perceptible in
+   isolation, but the eye tracks it and the whole canvas feels "alive". */
+@keyframes drift {
+  0%   { transform: translate3d(-2%, -1%, 0) rotate(0.5deg); }
+  100% { transform: translate3d( 2%,  1%, 0) rotate(-0.5deg); }
 }
 .fade-up-bottom {
   animation: atlas-fade-up-bottom .24s cubic-bezier(0.34, 1.56, 0.64, 1) both;
@@ -101,16 +471,39 @@ figure svg {
   height: auto;
   display: block;
 }
+/* The zoom modal wraps the SVG in a flex items-center/justify-center box.
+   Mermaid emits width="100%" plus an inline style="max-width: Npx", which
+   inside a flex-shrink-to-content parent collapses to 0×0 (content wants its
+   parent's width; parent wants its content's width). Give the host an
+   explicit size and force the SVG to fill it — viewBox preserves the
+   aspect ratio inside the box. */
 .mermaid-zoom-svg {
-  display: inline-block;
-  line-height: 0;   /* kill whitespace gaps */
+  display: block;
+  width: min(85vw, 1100px);
+  height: min(80vh, 720px);
+  line-height: 0;
 }
 .mermaid-zoom-svg svg {
-  max-width: min(85vw, 1100px);
-  max-height: min(80vh, 720px);
-  width: auto;
-  height: auto;
+  width: 100% !important;
+  height: 100% !important;
+  max-width: none !important;
+  max-height: none !important;
 }
+
+/* ---------- Dark-mode muted-text bumps ----------
+   Against the saturated radial-gradient backdrop, Tailwind's stock slate-500
+   (#64748b) and zinc-500 (#71717a) drop below ~4.5:1 contrast where the
+   canvas leans cyan/emerald. Bumping each one step brighter restores
+   legibility for secondary labels (dates, counts, placeholders, meta).
+   These rules sit AFTER `@tailwind utilities` so they override on same
+   specificity via source order; the light-mode block below overrides
+   these via higher specificity when `data-app-mode="light"`. */
+.text-slate-500 { color: #94a3b8; }  /* was #64748b → slate-400 value */
+.text-slate-400 { color: #cbd5e1; }  /* was #94a3b8 → slate-300 value */
+.text-zinc-500  { color: #a1a1aa; }  /* was #71717a → zinc-400 value */
+.text-zinc-400  { color: #d4d4d8; }  /* was #a1a1aa → zinc-300 value */
+.placeholder\:text-slate-500::placeholder { color: #94a3b8; }
+.placeholder\:text-slate-400::placeholder { color: #cbd5e1; }
 
 /* ---------- Light app mode ----------
    An opt-in override layer. `html[data-app-mode="light"]` re-skins the chrome
@@ -120,17 +513,6 @@ figure svg {
 html[data-app-mode="light"] body {
   background: #ffffff;
   color: #0f172a;
-}
-html[data-app-mode="light"] .stage-shell {
-  background: #f8fafc;
-}
-html[data-app-mode="light"] .aurora-bg {
-  opacity: 0.14;       /* dial back so the white canvas doesn't read as a gradient */
-  filter: blur(90px);
-}
-html[data-app-mode="light"] .glass-panel {
-  background: rgba(255, 255, 255, 0.82);
-  border-color: rgba(15, 23, 42, 0.08) !important;
 }
 html[data-app-mode="light"] .markdown-body strong { color: #0f172a; }
 html[data-app-mode="light"] .markdown-body em { color: #1e293b; }
@@ -152,9 +534,9 @@ html[data-app-mode="light"] .markdown-body pre code { color: #0f172a; }
 html[data-app-mode="light"] .text-slate-100 { color: #0f172a; }
 html[data-app-mode="light"] .text-slate-200 { color: #1e293b; }
 html[data-app-mode="light"] .text-slate-300 { color: #334155; }
-html[data-app-mode="light"] .text-slate-400 { color: #475569; }
-html[data-app-mode="light"] .text-slate-500 { color: #64748b; }
-html[data-app-mode="light"] .text-slate-600 { color: #94a3b8; }
+html[data-app-mode="light"] .text-slate-400 { color: #334155; }  /* was #475569 — bump one step; sat-200% glass makes mid-grey text bleed */
+html[data-app-mode="light"] .text-slate-500 { color: #475569; }  /* was #64748b */
+html[data-app-mode="light"] .text-slate-600 { color: #64748b; }  /* was #94a3b8 */
 html[data-app-mode="light"] .text-white { color: #0f172a; }
 
 html[data-app-mode="light"] .bg-white\/5 { background-color: rgba(15, 23, 42, 0.04) !important; }
