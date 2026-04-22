@@ -5,6 +5,7 @@ import { useMatch, useNavigate } from "react-router-dom";
 import { useUiStore, type ReadingMode } from "@/stores/ui-store";
 import { PALETTES } from "@/lib/theme";
 import { QUICK_PROMPTS } from "@/lib/quick-prompts";
+import { u } from "@/lib/api";
 
 type Paper = { arxiv_id: string; title: string };
 
@@ -37,7 +38,7 @@ export function CommandPalette({ open, onClose, onSearch, onShowShortcuts }: Pro
   useEffect(() => {
     if (!open) return;
     priorFocusRef.current = document.activeElement as HTMLElement | null;
-    fetch("/api/digest").then((r) => r.json()).then((b) => setPapers(b.papers ?? [])).catch(() => setPapers([]));
+    fetch(u("/api/digest")).then((r) => r.json()).then((b) => setPapers(b.papers ?? [])).catch(() => setPapers([]));
     return () => {
       const prior = priorFocusRef.current;
       if (prior && typeof prior.focus === "function" && document.contains(prior)) {

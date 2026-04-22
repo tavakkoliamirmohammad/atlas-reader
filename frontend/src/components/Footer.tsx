@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useUiStore } from "@/stores/ui-store";
+import { u } from "@/lib/api";
 
 type Health = { ai: boolean; backends?: { claude: boolean; codex: boolean } };
 
@@ -7,7 +8,7 @@ export function Footer() {
   const backend = useUiStore((s) => s.backend);
   const [health, setHealth] = useState<Health | null>(null);
   useEffect(() => {
-    fetch("/api/health")
+    fetch(u("/api/health"))
       .then((r) => r.json())
       .then((b: Health) => setHealth(b))
       .catch(() => setHealth({ ai: false }));

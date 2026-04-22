@@ -1,10 +1,11 @@
 """Per-paper LLM-generated glossary repository.
 
 Two operations talk to an AI backend (default codex):
-- `extract_terms` runs on the abstract once per paper, returns a JSON array of
-  term strings, and inserts them with NULL definitions.
-- `define` lazily generates a one-line explainer for a single term and persists
-  it so subsequent hovers are free.
+- `extract_terms` reads the paper's PDF (via the AI's Read tool) and returns
+  a JSON array of jargon/system/concept terms, persisted with NULL
+  definitions.
+- `define` lazily generates a one-line explainer for a single term and
+  persists it so subsequent hovers are free.
 """
 
 from __future__ import annotations
@@ -13,14 +14,14 @@ import json
 import sqlite3
 from typing import List, Optional
 
-from app import ai_backend, db, papers
+from app import ai_backend, db, papers, pdf_cache
 
 
 _EXTRACT_PROMPT = (
-    "From this abstract, extract 5-8 technical terms (compiler/MLIR/DSL "
-    "jargon, system names, novel concepts) that would benefit from a "
-    "1-line explainer. Output a JSON array of strings, no prose. "
-    "No code fences, no commentary."
+    "Use the Read tool to scan the PDF, then extract 6-10 technical terms "
+    "(compiler/MLIR/DSL jargon, system names, novel concepts, or acronyms "
+    "the paper defines) that would benefit from a 1-line explainer. Output "
+    "a JSON array of strings, no prose. No code fences, no commentary."
 )
 
 
@@ -28,6 +29,8 @@ async def _run_text(
     directive: str,
     prompt: str,
     backend: str = ai_backend.DEFAULT_BACKEND,
+    *,
+    enable_read_file: Optional[str] = None,
 ) -> str:
     """Collect every chunk from ai_backend.run_ai into one string."""
     parts: list[str] = []
@@ -36,6 +39,7 @@ async def _run_text(
         task="glossary",
         directive=directive,
         prompt=prompt,
+        enable_read_file=enable_read_file,
     ):
         parts.append(chunk)
     return "".join(parts)
@@ -93,12 +97,14 @@ async def extract_terms(
     if paper is None:
         raise KeyError(arxiv_id)
 
-    abstract = (paper["abstract"] or "").strip()
-    if not abstract:
-        return []
-
-    prompt = f"ABSTRACT:\n{abstract}\n\n{_EXTRACT_PROMPT}"
-    raw = await _run_text("Extract terms as a JSON array.", prompt, backend=backend)
+    pdf_path = await pdf_cache.ensure_cached(arxiv_id)
+    prompt = f"PDF: {pdf_path}\n\n{_EXTRACT_PROMPT}"
+    raw = await _run_text(
+        "Extract terms as a JSON array.",
+        prompt,
+        backend=backend,
+        enable_read_file=str(pdf_path),
+    )
     terms = _parse_terms(raw)
     if not terms:
         return []

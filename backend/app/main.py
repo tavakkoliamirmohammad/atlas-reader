@@ -11,6 +11,7 @@ from pathlib import Path
 
 import httpx
 from fastapi import FastAPI, HTTPException, Response
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -37,40 +38,34 @@ from fastapi import UploadFile, File, Form
 
 
 async def _daily_build_loop() -> None:
-    """Once an hour, run three maintenance sweeps:
+    """Twice-daily build + maintenance sweeps.
 
-    1. Build today's digest if missing (arXiv fetch, no AI ranking).
-    2. Prune orphan PDFs — cached bytes with no `papers` row pointing at
-       them. Always-on; zero data-loss risk because we only delete files
-       nothing references.
-    3. If `ATLAS_CHAT_RETENTION_DAYS` is set, prune chat messages older
-       than that many days. Off by default — users keep their history
-       forever unless they opt in to retention.
+    1. Build today's digest if missing/stale. arXiv publishes new abstracts
+       once per day (~00:00 ET). Running at 07:00 and 14:00 local covers the
+       day's batch plus any late corrections, without spamming the API.
+    2. Prune orphan PDFs — cached bytes with no `papers` row pointing at them.
+    3. If `ATLAS_CHAT_RETENTION_DAYS` is set, prune old chat messages.
     """
     import logging
-    from datetime import date
+    from datetime import date, datetime, time as dtime, timedelta
     log = logging.getLogger("atlas.scheduler")
-    while True:
-        # --- 1. Today's digest ---
-        try:
-            today = date.today().isoformat()
-            with db.connect() as conn:
-                cur = conn.execute("SELECT status FROM builds WHERE date = ?", (today,))
-                row = cur.fetchone()
-            if row is None or row["status"] != "done":
-                log.info("scheduler: building today's digest (status=%s)",
-                         None if row is None else row["status"])
-                try:
-                    await digest.build_today(rank=False)
-                    log.info("scheduler: build complete")
-                except Exception as e:                # noqa: BLE001
-                    log.warning("scheduler: build failed: %s: %s", type(e).__name__, e)
-        except asyncio.CancelledError:
-            raise
-        except Exception:                             # noqa: BLE001
-            log.exception("scheduler: digest tick error")
 
-        # --- 2. Orphan-PDF sweep (always on) ---
+    SLOTS = (dtime(7, 0), dtime(14, 0))
+
+    def _next_slot() -> datetime:
+        now = datetime.now()
+        today_slots = [datetime.combine(now.date(), s) for s in SLOTS]
+        future = [t for t in today_slots if t > now]
+        return future[0] if future else today_slots[0] + timedelta(days=1)
+
+    async def _do_build(reason: str) -> None:
+        try:
+            await digest.build_today()
+            log.info("scheduler: build complete (%s)", reason)
+        except Exception as e:                         # noqa: BLE001
+            log.warning("scheduler: build failed: %s: %s", type(e).__name__, e)
+
+    async def _do_sweeps() -> None:
         try:
             orphans = conversations.prune_orphan_pdfs()
             if orphans:
@@ -78,7 +73,6 @@ async def _daily_build_loop() -> None:
         except Exception:                             # noqa: BLE001
             log.exception("scheduler: orphan-pdf sweep failed")
 
-        # --- 3. Chat retention (opt-in) ---
         retention_env = os.environ.get("ATLAS_CHAT_RETENTION_DAYS")
         if retention_env:
             try:
@@ -94,10 +88,30 @@ async def _daily_build_loop() -> None:
             except Exception:                         # noqa: BLE001
                 log.exception("scheduler: chat retention sweep failed")
 
+    # Startup catch-up: if today's build hasn't landed yet, run now.
+    try:
+        today = date.today().isoformat()
+        with db.connect() as conn:
+            cur = conn.execute("SELECT status FROM builds WHERE date = ?", (today,))
+            row = cur.fetchone()
+        if row is None or row["status"] not in ("done", "partial"):
+            await _do_build("startup catch-up")
+            await _do_sweeps()
+    except asyncio.CancelledError:
+        raise
+    except Exception:                                  # noqa: BLE001
+        log.exception("scheduler: catch-up check failed")
+
+    while True:
+        target = _next_slot()
+        delay = max((target - datetime.now()).total_seconds(), 1.0)
+        log.info("scheduler: next run at %s (%.0fs)", target.isoformat(timespec="seconds"), delay)
         try:
-            await asyncio.sleep(3600)  # 1 hour
+            await asyncio.sleep(delay)
         except asyncio.CancelledError:
             return
+        await _do_build("scheduled")
+        await _do_sweeps()
 
 
 @asynccontextmanager
@@ -115,6 +129,25 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Atlas", lifespan=lifespan)
+
+# CORS: allow the hosted UI (Cloudflare Pages / GitHub Pages / custom domain)
+# to call this user's localhost backend. Default includes the vite dev server
+# so local development keeps working. Override with ATLAS_CORS_ORIGINS
+# (comma-separated) once you know your deployed URL, e.g.:
+#   ATLAS_CORS_ORIGINS="https://paper-dashboard.pages.dev"
+_default_origins = "http://localhost:5173,http://127.0.0.1:5173"
+_origins = [
+    o.strip()
+    for o in os.environ.get("ATLAS_CORS_ORIGINS", _default_origins).split(",")
+    if o.strip()
+]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 @app.get("/api/health")
@@ -143,14 +176,9 @@ def _row_to_dict(row) -> dict:
 async def get_digest(
     build: bool = False,
     days: str = "7",
-    backend: str | None = None,
-    rank: bool = True,
 ) -> dict:
     if build:
-        await digest.build_today(
-            backend=ai_backend.normalize_backend(backend),
-            rank=rank,
-        )
+        await digest.build_today()
     days_arg: int | None
     if days == "all":
         days_arg = None
@@ -536,9 +564,18 @@ if _dist is not None:
     if (_dist / "assets").exists():
         app.mount("/assets", StaticFiles(directory=_dist / "assets"), name="assets")
 
+    # index.html must never be cached — the hashed JS/CSS filenames inside
+    # change on every build, and a stale HTML reference will 404 against the
+    # new bundle or (worse) boot with old JS. The hashed assets themselves are
+    # served by StaticFiles above and can be cached indefinitely by filename.
+    _NO_CACHE_HEADERS = {
+        "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+        "Pragma": "no-cache",
+    }
+
     @app.get("/", include_in_schema=False)
     async def _index() -> FileResponse:
-        return FileResponse(_dist / "index.html")
+        return FileResponse(_dist / "index.html", headers=_NO_CACHE_HEADERS)
 
     @app.get("/{full_path:path}", include_in_schema=False)
     async def _spa_fallback(full_path: str) -> FileResponse:
@@ -547,4 +584,4 @@ if _dist is not None:
         candidate = _dist / full_path
         if candidate.is_file():
             return FileResponse(candidate)
-        return FileResponse(_dist / "index.html")
+        return FileResponse(_dist / "index.html", headers=_NO_CACHE_HEADERS)

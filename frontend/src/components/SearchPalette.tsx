@@ -177,7 +177,7 @@ export function SearchPalette({ open, onClose }: Props) {
             autoFocus
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search papers (title, authors, abstract)..."
+            placeholder="Search papers (title, authors)..."
             className="flex-1 bg-transparent text-sm text-zinc-100 outline-none placeholder:text-zinc-500"
           />
           <span className="text-[10px] uppercase tracking-wider text-zinc-500">

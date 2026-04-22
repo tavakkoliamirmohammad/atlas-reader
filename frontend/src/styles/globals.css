@@ -12,6 +12,11 @@
   --ac1-strong: rgba(34,211,238,0.55);
   --ac2-soft:   rgba(16,185,129,0.10);
   --user-grad:  linear-gradient(135deg, var(--ac1), var(--ac2));
+  /* Brand icon tile: sits in the top-left of the nav bar behind the compass
+     rose. Dark-mode default is a near-black frosted pane; light mode flips
+     to a soft accent-tinted glass so the tile doesn't read as a dark hole
+     on the page. See html[data-app-mode="light"] below. */
+  --brand-icon-tile-bg: rgba(10, 14, 24, 0.55);
   --user-ink:   #06121a;
   --ink:        6 18 26;
   --left-w: 270px;
@@ -77,6 +82,20 @@ html[data-app-mode="light"] {
                         0 6px 24px -8px rgba(34, 211, 238, 0.28);
   --glass-blur:         56px;
   --glass-saturate:     150%;
+
+  /* Accent-tinted glass tile for the brand compass-rose in the top bar —
+     replaces the dark-mode default which would read as a dark blob against
+     the light backdrop. */
+  --brand-icon-tile-bg: rgba(34, 211, 238, 0.14);
+}
+
+/* The wordmark uses `background-clip: text` with `--user-grad` (a palette-
+   driven cyan→emerald gradient). In dark mode the colors pop; in light mode
+   the same colors become a pale teal stripe on near-white that fails
+   contrast. A filter preserves the gradient identity while pushing its
+   luminosity into a readable range. */
+html[data-app-mode="light"] .brand-wordmark {
+  filter: saturate(1.3) brightness(0.58);
 }
 
 html, body, #root { height: 100%; overflow: hidden; }

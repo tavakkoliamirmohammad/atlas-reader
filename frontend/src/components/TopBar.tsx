@@ -33,7 +33,7 @@ export function TopBar() {
           aria-hidden
           className="relative inline-flex items-center justify-center w-7 h-7 rounded-[8px] self-center transition-transform duration-200 group-hover:scale-[1.06] group-hover:rotate-[6deg]"
           style={{
-            background: "rgba(10, 14, 24, 0.55)",
+            background: "var(--brand-icon-tile-bg)",
             boxShadow:
               "inset 0 0 0 1px var(--ac1-mid), 0 4px 14px -6px var(--ac1-mid), inset 0 1px 0 rgba(255,255,255,0.08)",
           }}

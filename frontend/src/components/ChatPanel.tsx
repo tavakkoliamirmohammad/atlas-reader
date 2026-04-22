@@ -320,12 +320,16 @@ export function ChatPanel() {
       <div
         className="flex-1 overflow-y-auto px-3 flex flex-col gap-2"
         style={{
+          // Only the top fades — the bottom mask caused streaming text to
+          // flicker as it stepped through a 24px opacity gradient on every
+          // chunk. The input area below already provides visual separation.
           WebkitMaskImage:
-            "linear-gradient(to bottom, transparent 0, black 40px, black calc(100% - 24px), transparent 100%)",
+            "linear-gradient(to bottom, transparent 0, black 40px, black 100%)",
           maskImage:
-            "linear-gradient(to bottom, transparent 0, black 40px, black calc(100% - 24px), transparent 100%)",
+            "linear-gradient(to bottom, transparent 0, black 40px, black 100%)",
           paddingTop: 40,
-          paddingBottom: 24,
+          paddingBottom: 16,
+          scrollPaddingBottom: 24,
         }}
       >
         {messages.length === 0 && !streaming && (

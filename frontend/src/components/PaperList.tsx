@@ -35,30 +35,6 @@ function computeAllCounts(papers: Paper[]): RangeCounts {
   return out;
 }
 
-const TIER_META = {
-  A: { label: "Must read",     icon: "🔥", color: "#fb7185" },
-  B: { label: "Worth knowing", icon: "⭐", color: "#fbbf24" },
-  C: { label: "Peripheral",    icon: "📄", color: "#94a3b8" },
-} as const;
-
-type TierKey = keyof typeof TIER_META;
-
-function tierFor(p: Paper): TierKey | null {
-  if (p.ai_tier == null) return null;
-  if (p.ai_tier >= 4) return "A";
-  if (p.ai_tier >= 2) return "B";
-  return "C";
-}
-
-function groupByTier(papers: Paper[]): Record<TierKey, Paper[]> {
-  const out: Record<TierKey, Paper[]> = { A: [], B: [], C: [] };
-  for (const p of papers) {
-    const t = tierFor(p);
-    if (t) out[t].push(p);
-  }
-  return out;
-}
-
 export function PaperList() {
   const [papers, setPapers] = useState<Paper[]>([]);
   const [loading, setLoading] = useState(true);
@@ -150,35 +126,24 @@ export function PaperList() {
     setDigestRange(RANGE_OPTIONS[next].value);
   }
 
-  // Apply the in-range text filter client-side. Matches title, authors, or
-  // abstract (case-insensitive substring). Empty filter = no-op.
+  // Client-side filter: title + authors (case-insensitive substring).
   const filteredPapers = useMemo(() => {
     const q = filter.trim().toLowerCase();
     if (!q) return papers;
     return papers.filter(
       (p) =>
         p.title.toLowerCase().includes(q) ||
-        p.authors.toLowerCase().includes(q) ||
-        p.abstract.toLowerCase().includes(q),
+        p.authors.toLowerCase().includes(q),
     );
   }, [papers, filter]);
 
-  const hasTiers = filteredPapers.some((p) => p.ai_tier != null);
-  const tierGroups = hasTiers ? groupByTier(filteredPapers) : null;
-  const dayGroups = hasTiers ? null : groupPapersByDay(filteredPapers);
+  const dayGroups = groupPapersByDay(filteredPapers);
 
-  // Flattened row order so arrow-key nav can walk the visible list regardless
-  // of whether we're rendering tier groups or day groups. The visual grouping
-  // is decorative, navigation is one-dimensional.
-  const flatPapers = useMemo<Paper[]>(() => {
-    if (tierGroups) {
-      return (["A", "B", "C"] as TierKey[]).flatMap((t) => tierGroups[t]);
-    }
-    if (dayGroups) {
-      return dayGroups.flatMap((g) => g.papers);
-    }
-    return [];
-  }, [tierGroups, dayGroups]);
+  // Flat row order for arrow-key nav across the day groups.
+  const flatPapers = useMemo<Paper[]>(
+    () => dayGroups.flatMap((g) => g.papers),
+    [dayGroups],
+  );
 
   // Reset active index on first load / whenever the list shrinks below it.
   useEffect(() => {
@@ -347,34 +312,7 @@ export function PaperList() {
             </div>
           </div>
         )}
-        {tierGroups && (["A", "B", "C"] as TierKey[]).map((tier) => {
-          const items = tierGroups[tier];
-          if (items.length === 0) return null;
-          const meta = TIER_META[tier];
-          return (
-            <div key={tier} role="group" aria-label={meta.label}>
-              <div
-                className="px-3 pt-2.5 pb-1 text-[11px] uppercase tracking-wider font-semibold flex items-center gap-1.5"
-                style={{ color: meta.color }}
-              >
-                <span aria-hidden>{meta.icon}</span>
-                {meta.label} ({items.length})
-              </div>
-              {items.map((p) => {
-                const flatIdx = flatPapers.indexOf(p);
-                return (
-                  <PaperRow
-                    key={p.arxiv_id}
-                    paper={p}
-                    isActiveRow={flatIdx === activeIndex}
-                    onFocusRequest={() => setActiveIndex(flatIdx)}
-                  />
-                );
-              })}
-            </div>
-          );
-        })}
-        {dayGroups && dayGroups.map((g) => (
+        {dayGroups.map((g) => (
           <div key={g.isoDate} role="group" aria-label={g.dateLabel}>
             <div className="px-3 pt-2.5 pb-1 text-[11px] uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
               <span className="w-2 h-2 rounded-full bg-slate-600" />

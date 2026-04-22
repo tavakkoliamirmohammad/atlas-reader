@@ -11,11 +11,14 @@ from app.arxiv import Paper
 
 
 def upsert(items: Iterable[Paper]) -> int:
-    """Insert or replace paper rows. Returns the number of items processed
-    (which may exceed the number of distinct rows if the input contains
-    duplicate arxiv_ids)."""
+    """Insert or replace paper rows. Returns the number of items processed.
+
+    Abstracts are intentionally NOT stored (the column is kept as empty
+    string for schema stability); Atlas persists only the titles/authors/
+    categories needed to list and link to arXiv.
+    """
     rows = [
-        (p.arxiv_id, p.title, p.authors, p.abstract, p.categories, p.published)
+        (p.arxiv_id, p.title, p.authors, "", p.categories, p.published)
         for p in items
     ]
     with db.connect() as conn:

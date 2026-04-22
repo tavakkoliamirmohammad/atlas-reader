@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
 import { Flame } from "lucide-react";
+import { u } from "@/lib/api";
 
 type Stats = { streak_days: number; total_papers: number; papers_today: number };
 
 export function Streak() {
   const [s, setS] = useState<Stats | null>(null);
   useEffect(() => {
-    fetch("/api/stats")
+    fetch(u("/api/stats"))
       .then((r) => r.json())
       .then(setS)
       .catch(() => setS(null));

@@ -1,25 +1,42 @@
-"""Build today's digest: fetch arXiv, dedupe, persist. AI ranking added in Plan 3."""
+"""Build today's digest: fetch arXiv category feeds independently and persist.
+
+Design principles
+-----------------
+* **One simple `cat:X` query per category.** arXiv's search server resolves
+  these via a single index lookup; no complex `OR` chains that time out.
+* **Independent fetches.** `asyncio.gather(..., return_exceptions=True)` means
+  one flaky category never wipes out the whole build — partial success persists
+  what it got and records which categories failed.
+* **No server-side or client-side filtering.** We used to run a title-keyword
+  regex over the feed, but it had word-boundary false negatives (e.g. "GPUs"
+  plural). Since search is first-class, a full feed + FTS5 is both simpler
+  and more trustworthy than a hand-rolled filter.
+* **Upsert dedupes.** Re-running the same query is a no-op on the DB; no
+  need for per-source "last seen" bookkeeping.
+* **No ranking.** Atlas no longer scores papers with AI — the list is purely
+  chronological.
+"""
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import sqlite3
 from datetime import date, datetime, timezone
 
-from app import ai_backend, arxiv, db, health, papers, ranker
+from app import arxiv, db, papers
 
 
-# Mirrors ~/.claude/compiler-papers.sh
-PL_QUERY = "cat:cs.PL"
-KEYWORD_QUERY = (
-    '(cat:cs.AR OR cat:cs.DC) AND '
-    '(all:compiler OR all:MLIR OR all:LLVM OR all:"code generation" '
-    'OR all:DSL OR all:"intermediate representation" '
-    'OR all:"tensor compiler" OR all:"kernel optimization" '
-    'OR all:autotuning OR all:polyhedral OR all:vectorization '
-    'OR all:"loop optimization" OR all:tiling OR all:scheduling '
-    'OR all:dataflow OR all:HLS OR all:"hardware synthesis" '
-    'OR all:"instruction selection")'
-)
+log = logging.getLogger(__name__)
+
+
+# Categories relevant to a compiler / MLIR / PL / performance researcher.
+# All fetched unfiltered; the user can search to narrow. Order here defines
+# fetch order, which only matters for conflict resolution (first wins).
+CATEGORIES = ("cs.PL", "cs.AR", "cs.DC", "cs.PF", "cs.LG")
+
+MAX_PER_CATEGORY = 100
+FETCH_TIMEOUT = 30.0
 
 
 def _today_iso() -> str:
@@ -31,7 +48,6 @@ def _now_iso() -> str:
 
 
 def _start_build() -> None:
-    """Insert a 'building' row at start time, or reset finish/log on retry."""
     with db.connect() as conn:
         conn.execute(
             """INSERT INTO builds (date, status, started_at, finished_at, paper_count, log)
@@ -46,53 +62,54 @@ def _start_build() -> None:
         )
 
 
-def _finish_build(status: str, paper_count: int = 0, log: str = "") -> None:
-    """Update today's build row with the terminal status."""
+def _finish_build(status: str, paper_count: int, log_text: str) -> None:
     with db.connect() as conn:
         conn.execute(
             """UPDATE builds
                  SET status = ?, finished_at = ?, paper_count = ?, log = ?
                WHERE date = ?""",
-            (status, _now_iso(), paper_count, log, _today_iso()),
+            (status, _now_iso(), paper_count, log_text, _today_iso()),
         )
 
 
-async def build_today(
-    backend: str = ai_backend.DEFAULT_BACKEND,
-    rank: bool = True,
-) -> list[sqlite3.Row]:
-    """Fetch both arXiv queries, dedupe, persist, and return the row set.
+async def _fetch_category(cat: str) -> list[arxiv.Paper]:
+    return await arxiv.fetch_recent(
+        f"cat:{cat}", max_results=MAX_PER_CATEGORY, timeout=FETCH_TIMEOUT
+    )
 
-    When `rank` is True and the chosen backend's CLI is available, also runs
-    the AI ranker on all papers. Set `rank=False` to return as soon as the
-    arXiv fetch completes — useful when the caller wants the paper list fast
-    and does not care about AI tier ordering.
 
-    Ranker failures are logged but never block the build.
+async def build_today(**_ignored) -> list[sqlite3.Row]:
+    """Fetch every category in parallel, persist, return last 7 days.
+
+    Extra kwargs are accepted and ignored for backwards compatibility with
+    callers that still pass `backend=` or `rank=`.
     """
     _start_build()
-    try:
-        pl = await arxiv.fetch_recent(PL_QUERY, max_results=100)
-        other = await arxiv.fetch_recent(KEYWORD_QUERY, max_results=30)
-    except Exception as e:
-        # arXiv throttle / timeout / network flap. Don't propagate to the UI —
-        # return whatever is already cached in the DB so the list still loads.
-        import logging
-        logging.getLogger(__name__).warning("arxiv fetch failed: %s: %s", type(e).__name__, e)
-        _finish_build(status="failed", log=f"{type(e).__name__}: {e}")
-        return papers.list_recent(days=7)
+
+    results = await asyncio.gather(
+        *(_fetch_category(c) for c in CATEGORIES),
+        return_exceptions=True,
+    )
 
     seen: dict[str, arxiv.Paper] = {}
-    for p in (*pl, *other):
-        seen.setdefault(p.arxiv_id, p)
+    failures: list[str] = []
 
-    papers.upsert(list(seen.values()))
-    if rank and health.backend_available(backend):
-        try:
-            await ranker.score_papers(list(seen.values()), backend=backend)
-        except Exception as exc:
-            import logging
-            logging.getLogger(__name__).warning("ranker failed: %s", exc)
-    rows = papers.list_recent(days=7)
-    _finish_build(status="done", paper_count=len(seen))
-    return rows
+    for cat, res in zip(CATEGORIES, results):
+        if isinstance(res, Exception):
+            log.warning("fetch failed cat:%s: %s: %s", cat, type(res).__name__, res)
+            failures.append(f"{cat}:{type(res).__name__}")
+            continue
+        for p in res:
+            seen.setdefault(p.arxiv_id, p)
+
+    if seen:
+        papers.upsert(seen.values())
+
+    if not failures:
+        status = "done"
+    elif len(failures) == len(results):
+        status = "failed"
+    else:
+        status = "partial"
+    _finish_build(status=status, paper_count=len(seen), log_text="; ".join(failures))
+    return papers.list_recent(days=7)

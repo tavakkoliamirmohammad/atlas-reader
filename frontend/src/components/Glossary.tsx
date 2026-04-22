@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { ChevronDown, ChevronRight, RotateCw } from "lucide-react";
 import {
   type GlossaryTerm,
@@ -17,27 +18,257 @@ type DefState =
   | { status: "ready"; text: string }
   | { status: "error"; message: string };
 
-const HOVER_DELAY_MS = 200;
+// Popover geometry — nudges and viewport margins stay in one place so the
+// chip and the floating tooltip agree.
+const TOOLTIP_W = 264;
+const TOOLTIP_EST_H = 72;
+const VIEWPORT_PAD = 8;
+const TRIGGER_GAP = 6;
+const HOVER_OPEN_DELAY = 140;
+const HOVER_CLOSE_DELAY = 120;
+
+type Placement = "bottom" | "top";
+type Coords = { x: number; y: number; placement: Placement };
+
+function measure(trigger: HTMLElement): Coords {
+  const rect = trigger.getBoundingClientRect();
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  const spaceBelow = vh - rect.bottom;
+  const placement: Placement =
+    spaceBelow >= TOOLTIP_EST_H + TRIGGER_GAP + VIEWPORT_PAD ? "bottom" : "top";
+  const y =
+    placement === "bottom"
+      ? rect.bottom + TRIGGER_GAP
+      : rect.top - TRIGGER_GAP;
+  let x = rect.left;
+  if (x + TOOLTIP_W > vw - VIEWPORT_PAD) x = vw - TOOLTIP_W - VIEWPORT_PAD;
+  if (x < VIEWPORT_PAD) x = VIEWPORT_PAD;
+  return { x, y, placement };
+}
+
+function TermChip({
+  term,
+  def,
+  onRequestDef,
+}: {
+  term: GlossaryTerm;
+  def: DefState | undefined;
+  onRequestDef: () => void;
+}) {
+  const triggerRef = useRef<HTMLSpanElement | null>(null);
+  const [pinned, setPinned] = useState(false);
+  const [hovering, setHovering] = useState(false);
+  const [coords, setCoords] = useState<Coords | null>(null);
+  const openTimerRef = useRef<number | null>(null);
+  const closeTimerRef = useRef<number | null>(null);
+  const open = pinned || hovering;
+
+  const clearTimers = () => {
+    if (openTimerRef.current !== null) {
+      window.clearTimeout(openTimerRef.current);
+      openTimerRef.current = null;
+    }
+    if (closeTimerRef.current !== null) {
+      window.clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = null;
+    }
+  };
+
+  const scheduleOpen = () => {
+    if (closeTimerRef.current !== null) {
+      window.clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = null;
+    }
+    if (hovering || openTimerRef.current !== null) return;
+    openTimerRef.current = window.setTimeout(() => {
+      openTimerRef.current = null;
+      setHovering(true);
+      if (!def || def.status === "idle") onRequestDef();
+    }, HOVER_OPEN_DELAY);
+  };
+
+  const scheduleClose = () => {
+    if (openTimerRef.current !== null) {
+      window.clearTimeout(openTimerRef.current);
+      openTimerRef.current = null;
+    }
+    if (closeTimerRef.current !== null) return;
+    closeTimerRef.current = window.setTimeout(() => {
+      closeTimerRef.current = null;
+      setHovering(false);
+    }, HOVER_CLOSE_DELAY);
+  };
+
+  useEffect(() => () => clearTimers(), []);
+
+  // Position the popover. Re-measure on open, on scroll (any ancestor, so we
+  // use capture), and on window resize — keeps the tooltip glued to the chip.
+  useLayoutEffect(() => {
+    if (!open || !triggerRef.current) return;
+    const update = () => {
+      if (!triggerRef.current) return;
+      setCoords(measure(triggerRef.current));
+    };
+    update();
+    window.addEventListener("resize", update);
+    window.addEventListener("scroll", update, true);
+    return () => {
+      window.removeEventListener("resize", update);
+      window.removeEventListener("scroll", update, true);
+    };
+  }, [open]);
+
+  // When pinned, Esc closes and any click outside closes.
+  useEffect(() => {
+    if (!pinned) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        setPinned(false);
+      }
+    };
+    const onMouseDown = (e: MouseEvent) => {
+      const target = e.target as Node | null;
+      if (!target) return;
+      if (triggerRef.current?.contains(target)) return;
+      const tip = document.getElementById(`glossary-tip-${term.id}`);
+      if (tip?.contains(target)) return;
+      setPinned(false);
+    };
+    document.addEventListener("keydown", onKey);
+    document.addEventListener("mousedown", onMouseDown);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("mousedown", onMouseDown);
+    };
+  }, [pinned, term.id]);
+
+  const showTip = open && coords !== null;
+
+  return (
+    <>
+      <span
+        ref={triggerRef}
+        tabIndex={0}
+        role="button"
+        aria-describedby={showTip ? `glossary-tip-${term.id}` : undefined}
+        aria-expanded={pinned}
+        onMouseEnter={scheduleOpen}
+        onMouseLeave={scheduleClose}
+        onFocus={scheduleOpen}
+        onBlur={() => {
+          if (!pinned) scheduleClose();
+        }}
+        onClick={(e) => {
+          e.stopPropagation();
+          clearTimers();
+          setPinned((v) => !v);
+          setHovering(false);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            clearTimers();
+            setPinned((v) => !v);
+            setHovering(false);
+          }
+        }}
+        className={[
+          "inline-block select-none px-2 py-0.5 rounded-md text-[11px] cursor-pointer",
+          "border border-[color:var(--ac1-mid)] bg-[color:var(--ac1-soft)] text-slate-200",
+          "transition-[transform,box-shadow,border-color] duration-150",
+          "hover:-translate-y-[1px] hover:shadow-[0_3px_8px_-4px_var(--ac1-mid)]",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--ac1-mid)]",
+          pinned
+            ? "border-[color:var(--ac1)] shadow-[0_0_0_1px_var(--ac1)] bg-[color:var(--ac1-soft)]"
+            : "",
+        ].join(" ")}
+      >
+        {term.term}
+      </span>
+      {showTip &&
+        createPortal(
+          <div
+            id={`glossary-tip-${term.id}`}
+            role="tooltip"
+            onMouseEnter={scheduleOpen}
+            onMouseLeave={scheduleClose}
+            style={{
+              position: "fixed",
+              left: coords.x,
+              ...(coords.placement === "bottom"
+                ? { top: coords.y }
+                : { bottom: window.innerHeight - coords.y }),
+              width: TOOLTIP_W,
+              zIndex: 1000,
+            }}
+            className={[
+              "px-3 py-2 rounded-lg text-[11.5px] leading-snug",
+              "bg-slate-900/95 backdrop-blur-sm",
+              "border border-white/10 shadow-[0_10px_30px_-10px_rgba(0,0,0,0.6)]",
+              "text-slate-200",
+              "fade-up",
+            ].join(" ")}
+          >
+            {!def || def.status === "idle" || def.status === "loading" ? (
+              <div className="flex items-center gap-2 text-slate-400">
+                <span
+                  className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400"
+                  aria-hidden
+                />
+                Looking up…
+              </div>
+            ) : def.status === "ready" ? (
+              <span>{def.text}</span>
+            ) : (
+              <div className="flex flex-col gap-1.5">
+                <span className="text-rose-300 break-words">
+                  error: {def.message}
+                </span>
+                <button
+                  type="button"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onRequestDef();
+                  }}
+                  className="self-start px-1.5 py-0.5 rounded text-[10px] font-semibold text-slate-200 bg-white/5 border border-white/10 hover:bg-white/10 hover:border-[color:var(--ac1-mid)] cursor-pointer transition-colors"
+                >
+                  Retry
+                </button>
+              </div>
+            )}
+            {pinned && (
+              <div className="mt-2 pt-1.5 border-t border-white/5 text-[9.5px] uppercase tracking-wider text-slate-500 flex items-center justify-between">
+                <span>Pinned</span>
+                <kbd className="rounded bg-white/5 px-1 py-px font-mono text-[9px] normal-case">
+                  Esc
+                </kbd>
+              </div>
+            )}
+          </div>,
+          document.body,
+        )}
+    </>
+  );
+}
 
 export function Glossary({ arxivId }: Props) {
   const [open, setOpen] = useState(true);
   const [terms, setTerms] = useState<GlossaryTerm[] | null>(null);
   const [extracting, setExtracting] = useState(false);
-  const [hoveredTerm, setHoveredTerm] = useState<string | null>(null);
   const [defs, setDefs] = useState<Record<string, DefState>>({});
-  const hoverTimerRef = useRef<number | null>(null);
 
   // Reset state and reload on paper switch.
   useEffect(() => {
     setTerms(null);
-    setHoveredTerm(null);
     setDefs({});
     let cancelled = false;
     fetchGlossary(arxivId)
       .then((rows) => {
         if (cancelled) return;
         setTerms(rows);
-        // Seed the definition cache from any rows already populated server-side.
         const seed: Record<string, DefState> = {};
         for (const r of rows) {
           if (r.definition) seed[r.term] = { status: "ready", text: r.definition };
@@ -52,13 +283,6 @@ export function Glossary({ arxivId }: Props) {
     };
   }, [arxivId]);
 
-  // Cleanup hover timer on unmount.
-  useEffect(() => {
-    return () => {
-      if (hoverTimerRef.current !== null) window.clearTimeout(hoverTimerRef.current);
-    };
-  }, []);
-
   async function build() {
     if (extracting) return;
     setExtracting(true);
@@ -70,8 +294,7 @@ export function Glossary({ arxivId }: Props) {
         if (r.definition) seed[r.term] = { status: "ready", text: r.definition };
       }
       setDefs((prev) => ({ ...seed, ...prev }));
-    } catch (e) {
-      // Surface failure as a friendly empty state; keep the build button visible.
+    } catch {
       setTerms([]);
     } finally {
       setExtracting(false);
@@ -89,27 +312,7 @@ export function Glossary({ arxivId }: Props) {
       });
   }
 
-  function scheduleHover(term: string) {
-    if (hoverTimerRef.current !== null) window.clearTimeout(hoverTimerRef.current);
-    hoverTimerRef.current = window.setTimeout(() => {
-      setHoveredTerm(term);
-      const cur = defs[term];
-      // Auto-fetch on first hover; on error, the user clicks Retry instead.
-      if (!cur) fetchDefinition(term);
-    }, HOVER_DELAY_MS);
-  }
-
-  function cancelHover() {
-    if (hoverTimerRef.current !== null) {
-      window.clearTimeout(hoverTimerRef.current);
-      hoverTimerRef.current = null;
-    }
-    setHoveredTerm(null);
-  }
-
   const count = terms?.length ?? 0;
-  // The Build button stays visible in the header when we have zero terms, regardless
-  // of collapse state (per UX spec).
   const showBuildButton = terms !== null && count === 0;
 
   return (
@@ -121,9 +324,11 @@ export function Glossary({ arxivId }: Props) {
         aria-expanded={open}
       >
         <span className="flex items-center gap-2">
-          {open
-            ? <ChevronDown size={14} className="text-slate-400" />
-            : <ChevronRight size={14} className="text-slate-400" />}
+          {open ? (
+            <ChevronDown size={14} className="text-slate-400" />
+          ) : (
+            <ChevronRight size={14} className="text-slate-400" />
+          )}
           <span className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold">
             Glossary
           </span>
@@ -189,56 +394,15 @@ export function Glossary({ arxivId }: Props) {
               No terms yet — click Build glossary to extract.
             </div>
           ) : (
-            <div className="flex flex-wrap gap-1">
-              {terms.map((t) => {
-                const def = defs[t.term];
-                const showTip = hoveredTerm === t.term;
-                return (
-                  <div
-                    key={t.id}
-                    className="relative"
-                    onMouseEnter={() => scheduleHover(t.term)}
-                    onMouseLeave={cancelHover}
-                    onFocus={() => scheduleHover(t.term)}
-                    onBlur={cancelHover}
-                  >
-                    <span
-                      tabIndex={0}
-                      aria-describedby={showTip ? `glossary-tip-${t.id}` : undefined}
-                      className="inline-block px-2 py-0.5 rounded-md text-[11px] cursor-help border border-[color:var(--ac1-mid)] bg-[color:var(--ac1-soft)] text-slate-200 hover:translate-y-[-1px] transition-transform"
-                    >
-                      {t.term}
-                    </span>
-                    {showTip && (
-                      <div
-                        id={`glossary-tip-${t.id}`}
-                        role="tooltip"
-                        className="absolute z-50 left-0 top-full mt-1 w-64 max-w-[18rem] px-2.5 py-1.5 rounded-md text-[11px] leading-snug bg-slate-900/95 border border-white/10 text-slate-200 shadow-lg"
-                      >
-                        {!def || def.status === "idle" || def.status === "loading" ? (
-                          <span className="text-slate-400">Loading…</span>
-                        ) : def.status === "ready" ? (
-                          <span>{def.text}</span>
-                        ) : (
-                          <div className="flex flex-col gap-1.5">
-                            <span className="text-rose-300 break-words">
-                              error: {def.message}
-                            </span>
-                            <button
-                              type="button"
-                              onMouseDown={(e) => e.preventDefault()}
-                              onClick={() => fetchDefinition(t.term)}
-                              className="self-start px-1.5 py-0.5 rounded text-[10px] font-semibold text-slate-200 bg-white/5 border border-white/10 hover:bg-white/10 hover:border-[color:var(--ac1-mid)] cursor-pointer transition-colors"
-                            >
-                              Retry
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
+            <div className="flex flex-wrap gap-1.5">
+              {terms.map((t) => (
+                <TermChip
+                  key={t.id}
+                  term={t}
+                  def={defs[t.term]}
+                  onRequestDef={() => fetchDefinition(t.term)}
+                />
+              ))}
             </div>
           )}
         </div>

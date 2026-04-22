@@ -1,15 +1,22 @@
 import pytest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from app import db, glossary, papers
 from app.arxiv import Paper
 
 
+# extract_terms now reads the paper's PDF via the AI's Read tool. Tests don't
+# actually have a PDF on disk, so we mock ensure_cached in every extract_terms
+# test below.
+def _patch_pdf():
+    return patch("app.glossary.pdf_cache.ensure_cached", new=AsyncMock(return_value="/tmp/g1.pdf"))
+
+
 SAMPLE = Paper(
     "g1",
-    "Title",
+    "MLIR-based DSL for tiling polyhedral kernels with autotuning",
     "Author",
-    "An MLIR-based DSL for tiling polyhedral kernels with autotuning.",
+    "<abstract is not persisted>",
     "cs.PL",
     "2026-04-19T08:00:00Z",
 )
@@ -23,7 +30,7 @@ async def test_extract_terms_parses_json_array_and_persists(atlas_data_dir):
     async def _fake(**kwargs):
         yield '["MLIR", "DSL", "tiling", "polyhedral", "autotuning"]'
 
-    with patch("app.glossary.ai_backend.run_ai", _fake):
+    with _patch_pdf(), patch("app.glossary.ai_backend.run_ai", _fake):
         terms = await glossary.extract_terms("g1")
 
     assert terms == ["MLIR", "DSL", "tiling", "polyhedral", "autotuning"]
@@ -40,7 +47,7 @@ async def test_extract_terms_strips_code_fence(atlas_data_dir):
     async def _fake(**kwargs):
         yield '```json\n["MLIR", "DSL"]\n```'
 
-    with patch("app.glossary.ai_backend.run_ai", _fake):
+    with _patch_pdf(), patch("app.glossary.ai_backend.run_ai", _fake):
         terms = await glossary.extract_terms("g1")
 
     assert terms == ["MLIR", "DSL"]
@@ -54,7 +61,7 @@ async def test_extract_terms_falls_back_to_substring(atlas_data_dir):
     async def _fake(**kwargs):
         yield 'Sure, here are terms: ["one", "two"] hope that helps.'
 
-    with patch("app.glossary.ai_backend.run_ai", _fake):
+    with _patch_pdf(), patch("app.glossary.ai_backend.run_ai", _fake):
         terms = await glossary.extract_terms("g1")
 
     assert terms == ["one", "two"]
@@ -68,7 +75,7 @@ async def test_extract_terms_idempotent_preserves_definitions(atlas_data_dir):
     async def _fake(**kwargs):
         yield '["MLIR", "DSL"]'
 
-    with patch("app.glossary.ai_backend.run_ai", _fake):
+    with _patch_pdf(), patch("app.glossary.ai_backend.run_ai", _fake):
         await glossary.extract_terms("g1")
 
     with db.connect() as conn:
@@ -77,7 +84,7 @@ async def test_extract_terms_idempotent_preserves_definitions(atlas_data_dir):
             ("a one-line def", "g1", "MLIR"),
         )
 
-    with patch("app.glossary.ai_backend.run_ai", _fake):
+    with _patch_pdf(), patch("app.glossary.ai_backend.run_ai", _fake):
         await glossary.extract_terms("g1")
 
     rows = {r["term"]: r["definition"] for r in glossary.list_for("g1")}

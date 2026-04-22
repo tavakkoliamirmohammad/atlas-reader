@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { u } from "@/lib/api";
 
 function timeOfDay(): "morning" | "afternoon" | "evening" | "night" {
   const h = new Date().getHours();
@@ -12,7 +13,7 @@ function timeOfDay(): "morning" | "afternoon" | "evening" | "night" {
 export function Greeting({ name = "Amir" }: { name?: string }) {
   const [fresh, setFresh] = useState<number | null>(null);
   useEffect(() => {
-    fetch("/api/health")
+    fetch(u("/api/health"))
       .then((r) => r.json())
       .then((body) => setFresh(body.papers_today ?? null))
       .catch(() => setFresh(null));

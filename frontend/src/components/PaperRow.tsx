@@ -73,7 +73,6 @@ function ReadStateDot({
 export function PaperRow({ paper, isActiveRow, onFocusRequest }: Props) {
   const match = useMatch("/reader/:arxivId");
   const active = match?.params.arxivId === paper.arxiv_id;
-  const score = paper.ai_score;
   return (
     <Link
       id={`paper-row-${paper.arxiv_id}`}
@@ -98,15 +97,6 @@ export function PaperRow({ paper, isActiveRow, onFocusRequest }: Props) {
           {paper.authors.split(",")[0]}{paper.authors.includes(",") ? " et al." : ""} {"\u00b7"} {paper.categories.split(",")[0]}
         </div>
       </div>
-      {typeof score === "number" ? (
-        <span
-          className="shrink-0 font-mono text-[10px] text-slate-500 tabular-nums"
-          aria-label={`AI score ${Math.round(score)}`}
-          title={`AI score ${score.toFixed(1)}`}
-        >
-          {Math.round(score)}
-        </span>
-      ) : null}
     </Link>
   );
 }

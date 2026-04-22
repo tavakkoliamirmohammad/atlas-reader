@@ -1,5 +1,16 @@
 import { streamSSE, type SSEHandlers } from "./sse";
 
+// Build-time base URL for the Atlas backend.
+//   - Dev / same-origin bundled mode: leave unset → fetch("/api/x") hits the
+//     vite proxy (dev) or same origin (when the backend serves the SPA).
+//   - Hosted mode (Cloudflare Pages / GitHub Pages): set VITE_API_BASE to the
+//     user's local backend, e.g. "http://localhost:8765". Each user then talks
+//     to their own `atlas start` — no shared backend, no shared AI.
+const API_BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? "";
+
+/** Prefix a relative API path with the configured base URL. */
+export const u = (path: string): string => `${API_BASE}${path}`;
+
 export type Paper = {
   arxiv_id: string;
   title: string;
@@ -28,7 +39,7 @@ export type DigestResponse = { count: number; papers: Paper[] };
 export type DigestRange = 1 | 3 | 7 | 14 | 30 | "all";
 
 async function getJson<T>(path: string): Promise<T> {
-  const res = await fetch(path);
+  const res = await fetch(u(path));
   if (!res.ok) throw new Error(`${path} -> ${res.status}`);
   return res.json() as Promise<T>;
 }
@@ -44,7 +55,7 @@ export const api = {
     return getJson<DigestResponse>(`/api/digest${qs ? `?${qs}` : ""}`);
   },
   paper:   (id: string) => getJson<Paper>(`/api/papers/${encodeURIComponent(id)}`),
-  pdfUrl:  (id: string) => `/api/pdf/${encodeURIComponent(id)}`,
+  pdfUrl:  (id: string) => u(`/api/pdf/${encodeURIComponent(id)}`),
 };
 
 export type ModelChoice = "opus" | "sonnet" | "haiku";
@@ -88,7 +99,7 @@ export async function streamSummary(
   backend?: Backend,
 ): Promise<void> {
   const url = _withQuery(`/api/summarize/${arxivId}`, { model, backend });
-  return streamSSE(url, { method: "POST" }, handlers, signal);
+  return streamSSE(u(url), { method: "POST" }, handlers, signal);
 }
 
 function _withQuery(base: string, params: Record<string, string | undefined>): string {
@@ -111,7 +122,7 @@ export async function streamAsk(
 ): Promise<void> {
   const url = _withQuery(`/api/ask/${arxivId}`, { model, backend });
   return streamSSE(
-    url,
+    u(url),
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -126,7 +137,7 @@ export async function streamAsk(
 }
 
 export async function fetchConversations(arxivId: string): Promise<ChatMessage[]> {
-  const r = await fetch(`/api/conversations/${arxivId}`);
+  const r = await fetch(u(`/api/conversations/${arxivId}`));
   const body = await r.json();
   return body.messages.map(
     (m: { role: ChatMessage["role"]; content: string; model?: string | null }) => ({
@@ -139,7 +150,7 @@ export async function fetchConversations(arxivId: string): Promise<ChatMessage[]
 
 
 export async function clearConversation(arxivId: string): Promise<void> {
-  const r = await fetch(`/api/conversations/${encodeURIComponent(arxivId)}`, {
+  const r = await fetch(u(`/api/conversations/${encodeURIComponent(arxivId)}`), {
     method: "DELETE",
   });
   if (!r.ok && r.status !== 204) {
@@ -168,7 +179,7 @@ export type Highlight = {
 };
 
 export async function fetchHighlights(arxivId: string): Promise<Highlight[]> {
-  const r = await fetch(`/api/highlights/${encodeURIComponent(arxivId)}`);
+  const r = await fetch(u(`/api/highlights/${encodeURIComponent(arxivId)}`));
   if (!r.ok) throw new Error(`/api/highlights/${arxivId} -> ${r.status}`);
   const body = await r.json();
   return body.highlights as Highlight[];
@@ -184,7 +195,7 @@ export async function createHighlight(
     rects?: SelectionRect[] | null;
   },
 ): Promise<number> {
-  const r = await fetch(`/api/highlights/${encodeURIComponent(arxivId)}`, {
+  const r = await fetch(u(`/api/highlights/${encodeURIComponent(arxivId)}`), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),
@@ -195,7 +206,7 @@ export async function createHighlight(
 }
 
 export async function deleteHighlight(id: number): Promise<void> {
-  const r = await fetch(`/api/highlights/${id}`, { method: "DELETE" });
+  const r = await fetch(u(`/api/highlights/${id}`), { method: "DELETE" });
   if (!r.ok && r.status !== 204) throw new Error(`DELETE /api/highlights/${id} -> ${r.status}`);
 }
 
@@ -208,7 +219,7 @@ export type GlossaryTerm = {
 };
 
 export async function fetchGlossary(arxivId: string): Promise<GlossaryTerm[]> {
-  const r = await fetch(`/api/glossary/${encodeURIComponent(arxivId)}`);
+  const r = await fetch(u(`/api/glossary/${encodeURIComponent(arxivId)}`));
   if (!r.ok) throw new Error(`/api/glossary/${arxivId} -> ${r.status}`);
   const body = await r.json();
   return body.terms as GlossaryTerm[];
@@ -216,7 +227,7 @@ export async function fetchGlossary(arxivId: string): Promise<GlossaryTerm[]> {
 
 export async function extractGlossary(arxivId: string): Promise<GlossaryTerm[]> {
   const r = await fetch(
-    `/api/glossary/${encodeURIComponent(arxivId)}/extract`,
+    u(`/api/glossary/${encodeURIComponent(arxivId)}/extract`),
     { method: "POST" },
   );
   if (!r.ok) throw new Error(`POST /api/glossary/${arxivId}/extract -> ${r.status}`);
@@ -229,7 +240,7 @@ export async function fetchGlossaryDefinition(
   term: string,
 ): Promise<string> {
   const r = await fetch(
-    `/api/glossary/${encodeURIComponent(arxivId)}/${encodeURIComponent(term)}/definition`,
+    u(`/api/glossary/${encodeURIComponent(arxivId)}/${encodeURIComponent(term)}/definition`),
   );
   if (!r.ok) throw new Error(`definition ${r.status}`);
   const body = await r.json();
@@ -247,7 +258,7 @@ export type SearchResult = {
 export type SearchResponse = { count: number; results: SearchResult[] };
 
 export async function importPdfUrl(url: string): Promise<string> {
-  const r = await fetch("/api/papers/import-url", {
+  const r = await fetch(u("/api/papers/import-url"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ url }),
@@ -261,7 +272,7 @@ export async function importPdfUrl(url: string): Promise<string> {
 export async function importPdfUpload(file: File): Promise<string> {
   const form = new FormData();
   form.append("file", file, file.name);
-  const r = await fetch("/api/papers/import-upload", { method: "POST", body: form });
+  const r = await fetch(u("/api/papers/import-upload"), { method: "POST", body: form });
   const body = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(body.detail || `import-upload -> ${r.status}`);
   return body.arxiv_id as string;
@@ -276,7 +287,7 @@ export async function searchPapers(
   const q = query.trim();
   if (!q) return [];
   const url = `/api/search?q=${encodeURIComponent(q)}&limit=${limit}`;
-  const r = await fetch(url, { signal });
+  const r = await fetch(u(url), { signal });
   if (!r.ok) throw new Error(`/api/search -> ${r.status}`);
   const body: SearchResponse = await r.json();
   return body.results;

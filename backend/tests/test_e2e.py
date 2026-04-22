@@ -14,7 +14,7 @@ async def test_full_round_trip_health_digest_paper_pdf(atlas_data_dir, fixtures_
     """Build today's digest, fetch the digest, fetch one paper, fetch its PDF."""
     db.init()
     pl = [Paper("99", "Title", "A", "An abstract", "cs.PL", "2026-04-19T08:00:00Z")]
-    other: list[Paper] = []
+    empty: list[Paper] = []
     pdf_bytes = (fixtures_dir / "tiny.pdf").read_bytes()
 
     class _FakeResp:
@@ -45,12 +45,13 @@ async def test_full_round_trip_health_digest_paper_pdf(atlas_data_dir, fixtures_
 
         stream = _fake_stream
 
-    with patch("app.digest.arxiv.fetch_recent", new=AsyncMock(side_effect=[pl, other])):
+    # Five category queries now: cs.PL, cs.AR, cs.DC, cs.PF, cs.LG.
+    with patch("app.digest.arxiv.fetch_recent", new=AsyncMock(side_effect=[pl, empty, empty, empty, empty])):
         with patch("app.main.httpx.AsyncClient", _FakeClient):
             with patch(
                 "app.main.ai_backend.available_backends",
                 new=AsyncMock(return_value={"claude": False, "codex": False}),
-            ), patch("app.digest.health.backend_available", return_value=False):
+            ):
                 async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
                     h = await c.get("/api/health")
                     assert h.json()["ai"] is False

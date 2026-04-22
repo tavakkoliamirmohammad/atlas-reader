@@ -51,6 +51,12 @@ def codex_delta(event: dict) -> Optional[str]:
     Tool-use events (`command_execution`, `file_change`, etc.) are ignored so
     the user doesn't see raw shell output; their narration comes through via
     the accompanying `agent_message` items.
+
+    Appends a blank-line separator to each chunk: adjacent agent messages
+    would otherwise concatenate without a break, gluing narration like
+    "...tied to the paper." to the start of the final answer "## 1. …",
+    which markdown then renders as inline prose instead of a heading (same
+    failure mode turns "- A new idea" into "...results.- A new idea").
     """
     if event.get("type") != "item.completed":
         return None
@@ -59,7 +65,7 @@ def codex_delta(event: dict) -> Optional[str]:
         return None
     text = item.get("text")
     if isinstance(text, str) and text:
-        return text
+        return text if text.endswith("\n\n") else text + "\n\n"
     return None
 
 

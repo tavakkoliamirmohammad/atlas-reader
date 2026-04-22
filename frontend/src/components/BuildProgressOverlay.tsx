@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
+import { u } from "@/lib/api";
 
 type Props = { open: boolean; date: string; onDone: () => void };
 
@@ -10,7 +11,7 @@ export function BuildProgressOverlay({ open, date, onDone }: Props) {
   useEffect(() => {
     if (!open) return;
     setLines([]); setFinalStatus(null);
-    const src = new EventSource(`/api/build-progress?date=${encodeURIComponent(date)}`);
+    const src = new EventSource(u(`/api/build-progress?date=${encodeURIComponent(date)}`));
     src.onmessage = (e) => setLines((prev) => [...prev, e.data]);
     src.addEventListener("done", () => { setFinalStatus("done"); src.close(); setTimeout(onDone, 400); });
     src.addEventListener("failed", () => { setFinalStatus("failed"); src.close(); });
@@ -22,10 +23,10 @@ export function BuildProgressOverlay({ open, date, onDone }: Props) {
 
   return createPortal(
     <div className="fixed inset-0 z-40 flex flex-col items-center justify-center bg-black/80 backdrop-blur-md fade-up"
-         role="status" aria-live="polite" aria-label="Building today's digest">
+         role="status" aria-live="polite" aria-label="Atlas is charting today's papers">
       <div className="mb-6 text-center">
-        <div className="mb-2 text-lg font-medium text-zinc-100">Building today's digest</div>
-        <div className="text-xs text-zinc-400">arXiv fetch + AI tier ranking {"·"} a few seconds</div>
+        <div className="mb-2 text-lg font-medium text-zinc-100">Atlas is charting today's papers</div>
+        <div className="text-xs text-zinc-400">surveying arXiv {"·"} a few seconds</div>
       </div>
       <ul className="glass-elevated w-[min(520px,90vw)] space-y-1 rounded-xl p-4 font-mono text-xs text-zinc-300">
         {lines.map((line, i) => <li key={i} className="fade-up">{line}</li>)}

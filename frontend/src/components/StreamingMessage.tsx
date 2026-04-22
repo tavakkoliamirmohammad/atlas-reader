@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
@@ -174,10 +174,26 @@ function sanitizeStreamingMarkdown(content: string): string {
   return s;
 }
 
-export function StreamingMessage({ role, content, isStreaming, model }: Props) {
+function StreamingMessageImpl({ role, content, isStreaming, model }: Props) {
   const ref = useRef<HTMLDivElement>(null);
+  // Keep-latest-visible while streaming. We coalesce back-to-back chunks into
+  // a single rAF, but we MUST reset the pending flag in the cleanup path —
+  // otherwise React cancels the in-flight rAF before its callback runs, the
+  // flag stays `true` forever, and every subsequent effect returns early
+  // without scheduling a new scroll. Net effect: text streams into the DOM
+  // but the viewport never follows, making it look like the bubble is empty.
+  const scrollPendingRef = useRef(false);
   useEffect(() => {
-    ref.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    if (scrollPendingRef.current) return;
+    scrollPendingRef.current = true;
+    const raf = requestAnimationFrame(() => {
+      scrollPendingRef.current = false;
+      ref.current?.scrollIntoView({ block: "end" });
+    });
+    return () => {
+      cancelAnimationFrame(raf);
+      scrollPendingRef.current = false;
+    };
   }, [content]);
 
   const isUser = role === "user";
@@ -262,17 +278,60 @@ export function StreamingMessage({ role, content, isStreaming, model }: Props) {
         ) : isUser ? (
           content
         ) : (
-          <div className={isStreaming ? "is-streaming" : undefined}>
-            <ReactMarkdown
-              remarkPlugins={[remarkGfm, remarkMath]}
-              rehypePlugins={[rehypeKatex]}
-              components={markdownComponents(!!isStreaming)}
-            >
-              {isStreaming ? sanitizeStreamingMarkdown(content) : content}
-            </ReactMarkdown>
-          </div>
+          <StreamedMarkdown content={content} isStreaming={!!isStreaming} />
         )}
       </div>
     </div>
   );
 }
+
+/**
+ * Wraps ReactMarkdown so we can memoize on `(content, isStreaming)` —
+ * siblings re-rendering (e.g. a new chunk in the LAST message) no longer
+ * force finished messages to re-parse their entire markdown tree.
+ *
+ * Also memoizes the `components` map so ReactMarkdown doesn't see a fresh
+ * Components object each render and rebuild its internal renderer.
+ */
+const StreamedMarkdown = memo(
+  function StreamedMarkdown({
+    content,
+    isStreaming,
+  }: {
+    content: string;
+    isStreaming: boolean;
+  }) {
+    const components = useMemo(
+      () => markdownComponents(isStreaming),
+      [isStreaming],
+    );
+    const text = isStreaming ? sanitizeStreamingMarkdown(content) : content;
+    return (
+      <div className={isStreaming ? "is-streaming" : undefined}>
+        <ReactMarkdown
+          remarkPlugins={[remarkGfm, remarkMath]}
+          rehypePlugins={[rehypeKatex]}
+          components={components}
+        >
+          {text}
+        </ReactMarkdown>
+      </div>
+    );
+  },
+);
+
+/**
+ * Re-render the bubble only when content, streaming state, model, or role
+ * actually changes. Without this, every chunk in the *latest* message
+ * re-renders every prior message too — each one re-parsing its own markdown
+ * and re-running katex, which is the second-largest source of streaming
+ * jank after the scroll mask.
+ */
+export const StreamingMessage = memo(
+  StreamingMessageImpl,
+  (prev, next) =>
+    prev.role === next.role &&
+    prev.content === next.content &&
+    prev.isStreaming === next.isStreaming &&
+    prev.model === next.model,
+);

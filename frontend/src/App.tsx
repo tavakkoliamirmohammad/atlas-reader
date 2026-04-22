@@ -17,6 +17,8 @@ import { CommandPalette } from "./components/CommandPalette";
 import { SearchPalette } from "./components/SearchPalette";
 import { Footer } from "./components/Footer";
 import { BuildProgressOverlay } from "./components/BuildProgressOverlay";
+import { BackendOfflineOverlay } from "./components/BackendOfflineOverlay";
+import { u } from "./lib/api";
 
 export default function App() {
   const leftCollapsed = useUiStore((s) => s.leftCollapsed);
@@ -51,10 +53,10 @@ export default function App() {
   // responds. Ranking becomes opt-in via UI action rather than a blocking
   // first-load cost.
   useEffect(() => {
-    fetch("/api/digest").then((r) => r.json()).then((b) => {
+    fetch(u("/api/digest")).then((r) => r.json()).then((b) => {
       if ((b?.count ?? 0) === 0) {
         setBuildOpen(true);
-        fetch("/api/digest?build=true&rank=false").catch(() => {});
+        fetch(u("/api/digest?build=true&rank=false")).catch(() => {});
       }
     }).catch(() => {});
   }, []);
@@ -140,6 +142,7 @@ export default function App() {
         <BuildProgressOverlay open={buildOpen} date={todayISO} onDone={() => setBuildOpen(false)} />
       </div>
       <Footer />
+      <BackendOfflineOverlay />
     </div>
   );
 }
