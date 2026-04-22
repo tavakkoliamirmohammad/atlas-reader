@@ -89,33 +89,31 @@ html[data-app-mode="light"] {
   --brand-icon-tile-bg: rgba(34, 211, 238, 0.14);
 }
 
-/* The wordmark uses `background-clip: text` with `--user-grad` (a palette-
-   driven cyan→emerald gradient). In dark mode the colors pop; in light mode
-   the same colors become a pale teal stripe on near-white that fails
-   contrast. A filter preserves the gradient identity while pushing its
-   luminosity into a readable range. */
+/* Light-mode wordmark: flip off-white to a deep ink so the italic serif
+   reads as a publisher's imprint against paper, not a ghost. */
 html[data-app-mode="light"] .brand-wordmark {
-  filter: saturate(1.3) brightness(0.58);
+  color: #0b1220;
 }
 
 html, body, #root { height: 100%; overflow: hidden; }
 body { background: #08080d; color: #e5e7ef; font-family: Inter, system-ui, sans-serif; }
 
-/* Brand wordmark — Fraunces is a variable contemporary serif with an
-   `opsz` (optical size) axis. Pinning opsz to 144 gives us the display
-   cut (high contrast, sharper terminals) instead of the text cut that
-   gets served by default at smaller point sizes. SOFT 50 softens the
-   corners just enough to feel modern without going cartoonish. */
+/* Brand wordmark — Instrument Serif Italic. The italic form carries all
+   the character; we don't need a gradient fill, tile, or hover flourish
+   on top. Solid off-white on dark, solid ink on light. The "A"'s bracket
+   serifs echo the SVG mark next to it — that typographic rhyme is the
+   whole logo, nothing else needed. */
 .brand-wordmark {
-  font-family: "Fraunces", ui-serif, Georgia, "Times New Roman", serif;
-  font-variation-settings: "opsz" 144, "SOFT" 50;
-  font-weight: 500;
-  font-size: 20px;
+  font-family: "Instrument Serif", ui-serif, Georgia, "Times New Roman", serif;
+  font-style: italic;
+  font-weight: 400;
+  font-size: 24px;
   line-height: 28px;
-  letter-spacing: -0.015em;
-  /* Italicized small-caps-ish flourish on the first letter via font-feature-settings. */
-  font-feature-settings: "ss01" on, "liga" on;
+  letter-spacing: -0.01em;
+  color: #e5e7ef;
+  transition: color 0.2s ease;
 }
+a:hover .brand-wordmark { color: var(--ac1); }
 
 /* Drop the default chromium-blue focus box on interactive controls — it's
    a bright rectangle that clashes with the glass aesthetic. Keyboard users
@@ -867,3 +865,33 @@ html[data-motion="off"] .shimmer-hover:hover {
   user-select: none;
 }
 .textLayer.selecting .endOfContent { top: 0; }
+
+/* ---------- Date-jumper horizontal scroller ----------
+   Accent-colored glowing thumb so the scrollbar reads as interactive and
+   visible at rest on the dark surface. Webkit accepts `box-shadow` on
+   scrollbar pseudo-elements, which gives the glow. Firefox falls back to
+   `scrollbar-color` — no glow there, but the accent tint still reads. */
+.date-jumper {
+  scrollbar-width: thin;
+  scrollbar-color: var(--ac1) transparent;
+}
+.date-jumper::-webkit-scrollbar {
+  height: 6px;
+}
+.date-jumper::-webkit-scrollbar-track {
+  background: transparent;
+}
+.date-jumper::-webkit-scrollbar-thumb {
+  background: linear-gradient(90deg, var(--ac1), var(--ac2));
+  border-radius: 3px;
+  box-shadow:
+    0 0 6px rgba(var(--ac1-rgb), 0.75),
+    0 0 12px rgba(var(--ac1-rgb), 0.35);
+  transition: box-shadow 0.15s ease, filter 0.15s ease;
+}
+.date-jumper::-webkit-scrollbar-thumb:hover {
+  filter: brightness(1.15);
+  box-shadow:
+    0 0 8px rgba(var(--ac1-rgb), 0.9),
+    0 0 16px rgba(var(--ac1-rgb), 0.5);
+}

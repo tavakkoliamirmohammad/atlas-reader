@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { ChevronDown, ChevronRight } from "lucide-react";
 import { api, type Paper } from "@/lib/api";
 import { groupPapersByDay } from "@/lib/group-by-day";
 import { useUiStore, type DigestRange } from "@/stores/ui-store";
@@ -41,6 +42,11 @@ export function PaperList() {
   const [activeIndex, setActiveIndex] = useState(0);
   const [rangeCounts, setRangeCounts] = useState<RangeCounts | null>(null);
   const [filter, setFilter] = useState("");
+  // Days the user has collapsed. Keyed by isoDate so a given day stays collapsed
+  // across re-renders. Reset on range switch because the dayGroups themselves
+  // change shape — keeping stale keys around is harmless but clearing makes the
+  // UX predictable ("switch range → everything is open").
+  const [collapsedDays, setCollapsedDays] = useState<Set<string>>(() => new Set());
   const navigate = useNavigate();
   const listRef = useRef<HTMLDivElement | null>(null);
   const pickerRef = useRef<HTMLDivElement | null>(null);
@@ -51,7 +57,7 @@ export function PaperList() {
 
   // Reset filter when the user switches range so "no results" in 3d doesn't
   // silently hide all 30d papers too.
-  useEffect(() => { setFilter(""); }, [digestRange]);
+  useEffect(() => { setFilter(""); setCollapsedDays(new Set()); }, [digestRange]);
 
   useEffect(() => {
     let cancelled = false;
@@ -139,11 +145,49 @@ export function PaperList() {
 
   const dayGroups = groupPapersByDay(filteredPapers);
 
-  // Flat row order for arrow-key nav across the day groups.
+  // Flat row order for arrow-key nav across the day groups. Collapsed days are
+  // excluded so ↓/↑ skips hidden rows instead of moving through invisible items.
   const flatPapers = useMemo<Paper[]>(
-    () => dayGroups.flatMap((g) => g.papers),
-    [dayGroups],
+    () => dayGroups.flatMap((g) => (collapsedDays.has(g.isoDate) ? [] : g.papers)),
+    [dayGroups, collapsedDays],
   );
+
+  function toggleDayCollapsed(isoDate: string) {
+    setCollapsedDays((prev) => {
+      const next = new Set(prev);
+      if (next.has(isoDate)) next.delete(isoDate);
+      else next.add(isoDate);
+      return next;
+    });
+  }
+
+  // Jump the list scroll position to a specific day's header. If the day is
+  // currently collapsed, expand it first — the user's intent with "jump to
+  // date" is "show me this day." We `requestAnimationFrame` so the expand
+  // state commits before we measure the header's new position.
+  //
+  // We scroll the list container directly (scrollTo on listRef) rather than
+  // calling `scrollIntoView` on the header: `scrollIntoView` walks every
+  // scrollable ancestor — including the main page — which caused the whole
+  // UI to jump a few pixels when the caller clicked a pill. Scrolling only
+  // listRef keeps the motion local.
+  function jumpToDay(isoDate: string) {
+    setCollapsedDays((prev) => {
+      if (!prev.has(isoDate)) return prev;
+      const next = new Set(prev);
+      next.delete(isoDate);
+      return next;
+    });
+    requestAnimationFrame(() => {
+      const container = listRef.current;
+      const el = container?.querySelector<HTMLElement>(
+        `[data-day="${CSS.escape(isoDate)}"]`,
+      );
+      if (!container || !el) return;
+      const offset = el.offsetTop - container.offsetTop;
+      container.scrollTo({ top: Math.max(0, offset), behavior: "smooth" });
+    });
+  }
 
   // Reset active index on first load / whenever the list shrinks below it.
   useEffect(() => {
@@ -265,6 +309,37 @@ export function PaperList() {
           );
         })}
       </div>
+      {dayGroups.length > 1 && (
+        <div
+          role="toolbar"
+          aria-label="Jump to date"
+          className="date-jumper px-2 pb-2 overflow-x-auto"
+        >
+          <div className="flex gap-1.5 w-max">
+            {dayGroups.map((g, i) => {
+              const isTop = i === 0;
+              return (
+                <button
+                  key={g.isoDate}
+                  type="button"
+                  onClick={() => jumpToDay(g.isoDate)}
+                  title={`Jump to ${g.dateLabel} (${g.count} paper${g.count === 1 ? "" : "s"})`}
+                  className={[
+                    "px-2 py-1 rounded-full text-[11px] whitespace-nowrap flex-shrink-0 cursor-pointer transition-colors",
+                    "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[color:var(--ac1-mid)]",
+                    isTop
+                      ? "text-[color:var(--ac1)] bg-[color:var(--ac1-soft)] border border-[color:var(--ac1-mid)] hover:brightness-110"
+                      : "text-slate-300 bg-white/[0.03] border border-white/5 hover:bg-white/[0.08] hover:text-white hover:border-[color:var(--ac1-mid)]",
+                  ].join(" ")}
+                >
+                  <span>{g.dateLabel}</span>
+                  <span className="ml-1 font-mono tabular-nums opacity-70">{g.count}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
       <div
         ref={listRef}
         className="flex-1 overflow-y-auto"
@@ -312,25 +387,40 @@ export function PaperList() {
             </div>
           </div>
         )}
-        {dayGroups.map((g) => (
-          <div key={g.isoDate} role="group" aria-label={g.dateLabel}>
-            <div className="px-3 pt-2.5 pb-1 text-[11px] uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-slate-600" />
-              {g.dateLabel} ({g.count})
+        {dayGroups.map((g) => {
+          const collapsed = collapsedDays.has(g.isoDate);
+          return (
+            <div key={g.isoDate} data-day={g.isoDate} role="group" aria-label={g.dateLabel}>
+              <button
+                type="button"
+                onClick={() => toggleDayCollapsed(g.isoDate)}
+                aria-expanded={!collapsed}
+                aria-controls={`day-${g.isoDate}`}
+                className="w-full px-3 pt-2.5 pb-1 text-[11px] uppercase tracking-wider text-slate-500 flex items-center gap-1.5 cursor-pointer hover:text-slate-300 transition-colors focus-visible:outline-none focus-visible:text-slate-200"
+              >
+                {collapsed
+                  ? <ChevronRight size={12} className="text-slate-500" aria-hidden />
+                  : <ChevronDown size={12} className="text-slate-500" aria-hidden />}
+                <span>{g.dateLabel} ({g.count})</span>
+              </button>
+              {!collapsed && (
+                <div id={`day-${g.isoDate}`}>
+                  {g.papers.map((p) => {
+                    const flatIdx = flatPapers.indexOf(p);
+                    return (
+                      <PaperRow
+                        key={p.arxiv_id}
+                        paper={p}
+                        isActiveRow={flatIdx === activeIndex}
+                        onFocusRequest={() => setActiveIndex(flatIdx)}
+                      />
+                    );
+                  })}
+                </div>
+              )}
             </div>
-            {g.papers.map((p) => {
-              const flatIdx = flatPapers.indexOf(p);
-              return (
-                <PaperRow
-                  key={p.arxiv_id}
-                  paper={p}
-                  isActiveRow={flatIdx === activeIndex}
-                  onFocusRequest={() => setActiveIndex(flatIdx)}
-                />
-              );
-            })}
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );

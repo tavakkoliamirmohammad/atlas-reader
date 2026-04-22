@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Sun, Book, Moon } from "lucide-react";
+import { Sun, Book, Moon, Printer } from "lucide-react";
 import { useUiStore, type ReadingMode } from "@/stores/ui-store";
 import type { HighlightColor } from "@/lib/api";
 import { ReadingProgressRail, type RailSection } from "./ReadingProgressRail";
@@ -103,6 +103,30 @@ const MODES: { id: ReadingMode; label: string; Icon: typeof Sun }[] = [
   { id: "sepia", label: "Sepia", Icon: Book },
   { id: "dark",  label: "Dark",  Icon: Moon },
 ];
+
+/**
+ * Open the browser's print dialog for the whole PDF. We mount a same-origin
+ * hidden iframe pointed at the PDF URL, wait for load, then call print() on
+ * its contentWindow — that gives Chrome/Safari a proper PDF print preview
+ * instead of the React app's DOM. The iframe self-removes after a minute;
+ * there's no reliable cross-browser signal for when the print dialog closes.
+ */
+function printPdf(fileUrl: string) {
+  const iframe = document.createElement("iframe");
+  iframe.style.cssText =
+    "position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden;";
+  iframe.src = fileUrl;
+  iframe.onload = () => {
+    try {
+      iframe.contentWindow?.focus();
+      iframe.contentWindow?.print();
+    } catch {
+      window.open(fileUrl, "_blank", "noopener,noreferrer");
+    }
+    window.setTimeout(() => iframe.remove(), 60_000);
+  };
+  document.body.appendChild(iframe);
+}
 
 export function PdfPage({
   fileUrl,
@@ -341,6 +365,15 @@ export function PdfPage({
               );
             })}
           </span>
+          <button
+            type="button"
+            onClick={() => printPdf(fileUrl)}
+            aria-label="Print PDF"
+            title="Print PDF"
+            className="px-2 py-1 rounded-full text-[11px] flex items-center gap-1 text-slate-300 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+          >
+            <Printer size={12} /> Print
+          </button>
         </div>
       </div>
     </div>
