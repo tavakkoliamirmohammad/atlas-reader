@@ -8,7 +8,6 @@ import { UrlBar } from "./UrlBar";
 import { PaperRow } from "./PaperRow";
 
 const RANGE_OPTIONS: { value: DigestRange; label: string }[] = [
-  { value: 1,     label: "1d" },
   { value: 3,     label: "3d" },
   { value: 7,     label: "7d" },
   { value: 14,    label: "14d" },
@@ -47,6 +46,25 @@ export function PaperList() {
   // change shape — keeping stale keys around is harmless but clearing makes the
   // UX predictable ("switch range → everything is open").
   const [collapsedDays, setCollapsedDays] = useState<Set<string>>(() => new Set());
+  // Briefly flashed day after a date-pill jump — gives the user a visual
+  // anchor at the new scroll position. Cleared by a timeout so the flash
+  // plays once per click.
+  const [flashingDay, setFlashingDay] = useState<string | null>(null);
+  // The pill the user clicked most recently. Drives pill-highlight state in
+  // the date-jumper strip — clears when the user switches range (data
+  // changes, old selection no longer meaningful).
+  const [selectedDay, setSelectedDay] = useState<string | null>(null);
+  // When `jumpToDay` bumps activeIndex to the first paper of a target day,
+  // it handles the scrolling manually (smooth, to the day header). We want
+  // the activeIndex-driven scroll-into-view effect to sit this one out —
+  // otherwise it fires after React re-renders, calls scrollIntoView with
+  // default (instant) behavior, cancels our smooth scroll, and lands on
+  // "nearest" position instead of the top of the day.
+  const skipNextActiveScrollRef = useRef(false);
+  // Cancels a rAF-driven jump-to-day animation if the user clicks a new
+  // pill mid-scroll. Without this, two overlapping rAF loops fight and
+  // the scroll jitters.
+  const animateScrollRef = useRef<(() => void) | null>(null);
   const navigate = useNavigate();
   const listRef = useRef<HTMLDivElement | null>(null);
   const pickerRef = useRef<HTMLDivElement | null>(null);
@@ -57,7 +75,11 @@ export function PaperList() {
 
   // Reset filter when the user switches range so "no results" in 3d doesn't
   // silently hide all 30d papers too.
-  useEffect(() => { setFilter(""); setCollapsedDays(new Set()); }, [digestRange]);
+  useEffect(() => {
+    setFilter("");
+    setCollapsedDays(new Set());
+    setSelectedDay(null);
+  }, [digestRange]);
 
   useEffect(() => {
     let cancelled = false;
@@ -143,7 +165,12 @@ export function PaperList() {
     );
   }, [papers, filter]);
 
-  const dayGroups = groupPapersByDay(filteredPapers);
+  // Memoize so dayGroups keeps a stable reference between renders (only
+  // changes when filteredPapers changes). Without this, the derived
+  // `flatPapers` also re-references every render, causing the activeIndex
+  // scroll-into-view effect to fire on every re-render (setFlashingDay,
+  // etc.) and fight our rAF jumpToDay animation.
+  const dayGroups = useMemo(() => groupPapersByDay(filteredPapers), [filteredPapers]);
 
   // Flat row order for arrow-key nav across the day groups. Collapsed days are
   // excluded so ↓/↑ skips hidden rows instead of moving through invisible items.
@@ -163,29 +190,78 @@ export function PaperList() {
 
   // Jump the list scroll position to a specific day's header. If the day is
   // currently collapsed, expand it first — the user's intent with "jump to
-  // date" is "show me this day." We `requestAnimationFrame` so the expand
-  // state commits before we measure the header's new position.
+  // date" is "show me this day."
   //
-  // We scroll the list container directly (scrollTo on listRef) rather than
-  // calling `scrollIntoView` on the header: `scrollIntoView` walks every
-  // scrollable ancestor — including the main page — which caused the whole
-  // UI to jump a few pixels when the caller clicked a pill. Scrolling only
-  // listRef keeps the motion local.
+  // We also MOVE activeIndex to the first paper of that day. This is not
+  // cosmetic: the `activeIndex` effect below also scrolls its row into view.
+  // If we scroll the container to isoDate but leave activeIndex=0, that
+  // effect fires on re-render (from setFlashingDay) and immediately scrolls
+  // the container back to the top — which looks like "click did nothing."
+  // Moving activeIndex eliminates that race and is semantically right:
+  // clicking a date should focus-land on that day's first paper.
   function jumpToDay(isoDate: string) {
+    setSelectedDay(isoDate);
     setCollapsedDays((prev) => {
       if (!prev.has(isoDate)) return prev;
       const next = new Set(prev);
       next.delete(isoDate);
       return next;
     });
+    // Find the flat index of the first paper in this day group.
+    const dayGroup = dayGroups.find((g) => g.isoDate === isoDate);
+    const firstPaper = dayGroup?.papers[0];
+    if (firstPaper) {
+      const idx = flatPapers.indexOf(firstPaper);
+      if (idx >= 0) {
+        skipNextActiveScrollRef.current = true;
+        setActiveIndex(idx);
+      }
+    }
     requestAnimationFrame(() => {
       const container = listRef.current;
-      const el = container?.querySelector<HTMLElement>(
-        `[data-day="${CSS.escape(isoDate)}"]`,
+      if (!container) return;
+      // Direct dataset lookup avoids the CSS.escape pitfall: isoDate starts
+      // with a digit ("2026-…") which CSS.escape encodes as a hex escape
+      // that some browsers mishandle in attribute selectors.
+      let el: HTMLElement | null = null;
+      for (const candidate of container.querySelectorAll<HTMLElement>("[data-day]")) {
+        if (candidate.dataset.day === isoDate) {
+          el = candidate;
+          break;
+        }
+      }
+      if (!el) return;
+      const containerRect = container.getBoundingClientRect();
+      const elRect = el.getBoundingClientRect();
+      const target = Math.max(
+        0,
+        container.scrollTop + (elRect.top - containerRect.top),
       );
-      if (!container || !el) return;
-      const offset = el.offsetTop - container.offsetTop;
-      container.scrollTo({ top: Math.max(0, offset), behavior: "smooth" });
+      // Custom smooth scroll: Chrome's native `behavior: "smooth"`
+      // undershoots long jumps (observed ~400px short on a ~19k distance)
+      // and any correction mid-flight reads as a jump. Our own rAF loop
+      // with cubic-out easing lands on the exact target, consistently.
+      animateScrollRef.current?.();
+      const start = container.scrollTop;
+      const distance = target - start;
+      if (Math.abs(distance) > 1) {
+        const duration = Math.min(600, 260 + Math.abs(distance) * 0.04);
+        const t0 = performance.now();
+        let rafId = 0;
+        const step = (now: number) => {
+          const t = Math.min(1, (now - t0) / duration);
+          const eased = 1 - Math.pow(1 - t, 3); // easeOutCubic
+          container.scrollTop = start + distance * eased;
+          if (t < 1) rafId = requestAnimationFrame(step);
+          else animateScrollRef.current = null;
+        };
+        rafId = requestAnimationFrame(step);
+        animateScrollRef.current = () => cancelAnimationFrame(rafId);
+      }
+      setFlashingDay(isoDate);
+      window.setTimeout(() => {
+        setFlashingDay((cur) => (cur === isoDate ? null : cur));
+      }, 900);
     });
   }
 
@@ -217,8 +293,14 @@ export function PaperList() {
     }
   }
 
-  // Scroll the active row into view when it changes.
+  // Scroll the active row into view when it changes — unless jumpToDay just
+  // set activeIndex itself (it handles scrolling manually with smooth
+  // behavior to land the day header at the container top).
   useEffect(() => {
+    if (skipNextActiveScrollRef.current) {
+      skipNextActiveScrollRef.current = false;
+      return;
+    }
     const list = listRef.current;
     if (!list) return;
     const active = flatPapers[activeIndex];
@@ -259,7 +341,7 @@ export function PaperList() {
         ref={pickerRef}
         role="tablist"
         aria-label="Archive range"
-        className="relative rounded-xl border border-white/5 bg-white/[0.02] p-1 grid grid-cols-6 gap-0 mx-2 mb-2"
+        className="relative rounded-xl border border-white/5 bg-white/[0.02] p-1 grid grid-cols-5 gap-0 mx-2 mb-2"
       >
         <div
           aria-hidden
@@ -316,19 +398,34 @@ export function PaperList() {
           className="date-jumper px-2 pb-2 overflow-x-auto"
         >
           <div className="flex gap-1.5 w-max">
-            {dayGroups.map((g, i) => {
-              const isTop = i === 0;
+            {dayGroups.map((g) => {
+              // Fall back to the first (most recent) day when nothing has
+              // been clicked yet, so there's always a visual anchor.
+              const active = selectedDay
+                ? g.isoDate === selectedDay
+                : g.isoDate === dayGroups[0]?.isoDate;
               return (
                 <button
                   key={g.isoDate}
                   type="button"
-                  onClick={() => jumpToDay(g.isoDate)}
+                  aria-pressed={active}
+                  onClick={(e) => {
+                    jumpToDay(g.isoDate);
+                    // Keep the clicked pill in view: scroll only the strip
+                    // (block:"nearest" avoids any vertical page shift since
+                    // the pill is already vertically visible).
+                    e.currentTarget.scrollIntoView({
+                      behavior: "smooth",
+                      inline: "center",
+                      block: "nearest",
+                    });
+                  }}
                   title={`Jump to ${g.dateLabel} (${g.count} paper${g.count === 1 ? "" : "s"})`}
                   className={[
                     "px-2 py-1 rounded-full text-[11px] whitespace-nowrap flex-shrink-0 cursor-pointer transition-colors",
                     "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[color:var(--ac1-mid)]",
-                    isTop
-                      ? "text-[color:var(--ac1)] bg-[color:var(--ac1-soft)] border border-[color:var(--ac1-mid)] hover:brightness-110"
+                    active
+                      ? "text-[color:var(--ac1)] bg-[color:var(--ac1-soft)] border border-[color:var(--ac1-mid)] shadow-[0_0_10px_var(--ac1-mid)] hover:brightness-110"
                       : "text-slate-300 bg-white/[0.03] border border-white/5 hover:bg-white/[0.08] hover:text-white hover:border-[color:var(--ac1-mid)]",
                   ].join(" ")}
                 >
@@ -396,7 +493,10 @@ export function PaperList() {
                 onClick={() => toggleDayCollapsed(g.isoDate)}
                 aria-expanded={!collapsed}
                 aria-controls={`day-${g.isoDate}`}
-                className="w-full px-3 pt-2.5 pb-1 text-[11px] uppercase tracking-wider text-slate-500 flex items-center gap-1.5 cursor-pointer hover:text-slate-300 transition-colors focus-visible:outline-none focus-visible:text-slate-200"
+                className={[
+                  "w-full px-3 pt-2.5 pb-1 text-[11px] uppercase tracking-wider text-slate-500 flex items-center gap-1.5 cursor-pointer hover:text-slate-300 transition-colors focus-visible:outline-none focus-visible:text-slate-200",
+                  flashingDay === g.isoDate ? "day-flash" : "",
+                ].join(" ")}
               >
                 {collapsed
                   ? <ChevronRight size={12} className="text-slate-500" aria-hidden />
@@ -411,6 +511,7 @@ export function PaperList() {
                       <PaperRow
                         key={p.arxiv_id}
                         paper={p}
+                        enterIndex={flatIdx}
                         isActiveRow={flatIdx === activeIndex}
                         onFocusRequest={() => setActiveIndex(flatIdx)}
                       />

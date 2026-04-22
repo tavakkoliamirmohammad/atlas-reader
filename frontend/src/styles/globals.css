@@ -750,6 +750,48 @@ html[data-motion="off"] .is-streaming > *:last-child::after {
   50%      { opacity: 0.6; transform: scale(1.4); }
 }
 
+/* Day-header flash after a date-pill jump. A quick accent-tinted glow
+   fades out — anchors the eye at the new scroll position without feeling
+   like a full animation. */
+@keyframes atlas-day-flash {
+  0%   { background: var(--ac1-soft); color: var(--ac1); }
+  40%  { background: var(--ac1-soft); color: var(--ac1); }
+  100% { background: transparent; color: inherit; }
+}
+html[data-motion="on"] .day-flash {
+  animation: atlas-day-flash 900ms ease-out;
+}
+html[data-motion="off"] .day-flash {
+  animation: none !important;
+}
+
+/* Assistant-message leading rule. Static state = soft dimmed accent;
+   streaming state = animated cyan→emerald→cyan gradient that flows
+   vertically, giving the user a live indicator without a spinner. */
+.msg-rule-static {
+  background: rgba(148, 163, 184, 0.25);
+}
+.msg-rule-streaming {
+  background: linear-gradient(180deg,
+    var(--ac1) 0%,
+    var(--ac2) 50%,
+    var(--ac1) 100%);
+  background-size: 100% 200%;
+  box-shadow:
+    0 0 10px var(--ac1-strong),
+    0 0 2px var(--ac1);
+}
+@keyframes atlas-msg-rule-flow {
+  0%   { background-position: 0% 0%; }
+  100% { background-position: 0% 200%; }
+}
+html[data-motion="on"] .msg-rule-streaming {
+  animation: atlas-msg-rule-flow 1.2s linear infinite;
+}
+html[data-motion="off"] .msg-rule-streaming {
+  animation: none !important;
+}
+
 /* Indeterminate progress bar sweep — used by the PDF LoadingCard when the
    server omits Content-Length or we haven't seen bytes yet. */
 @keyframes atlas-indeterminate {

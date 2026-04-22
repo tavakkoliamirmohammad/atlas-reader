@@ -36,7 +36,7 @@ export type DigestResponse = { count: number; papers: Paper[] };
 
 // Defined here (not imported from the ui-store) to avoid a circular import:
 // ui-store.ts imports `HighlightColor` + `ModelChoice` from this module.
-export type DigestRange = 1 | 3 | 7 | 14 | 30 | "all";
+export type DigestRange = 3 | 7 | 14 | 30 | "all";
 
 async function getJson<T>(path: string): Promise<T> {
   const res = await fetch(u(path));

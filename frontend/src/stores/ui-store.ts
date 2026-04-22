@@ -100,7 +100,18 @@ export const useUiStore = create<UiState>()(
     }),
     {
       name: "atlas-ui",
+      version: 2,
       storage: createJSONStorage(() => localStorage),
+      // v2 drops the `1d` digest range. Any persisted store holding
+      // digestRange: 1 (pre-removal) gets upgraded to 7 so users don't land
+      // on an empty list after deploy.
+      migrate: (persisted: unknown, version) => {
+        const p = persisted as Record<string, unknown> | null;
+        if (p && version < 2 && p.digestRange === 1) {
+          p.digestRange = 7;
+        }
+        return p as UiState;
+      },
       // Only persist visual preferences — action-dispatcher fields are ephemeral.
       partialize: (s) => ({
         paletteId: s.paletteId,

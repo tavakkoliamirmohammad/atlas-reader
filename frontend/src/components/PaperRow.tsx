@@ -13,6 +13,12 @@ type Props = {
    * coherent — otherwise tapping Enter would jump somewhere unexpected.
    */
   onFocusRequest?: () => void;
+  /**
+   * Flat index in the visible list. Used to stagger the fade-up entry
+   * animation. React keys rows by arxiv_id, so rows that survive a filter
+   * change keep their DOM and don't re-animate — only first mount runs it.
+   */
+  enterIndex?: number;
 };
 
 /**
@@ -70,9 +76,13 @@ function ReadStateDot({
   );
 }
 
-export function PaperRow({ paper, isActiveRow, onFocusRequest }: Props) {
+export function PaperRow({ paper, isActiveRow, onFocusRequest, enterIndex }: Props) {
   const match = useMatch("/reader/:arxivId");
   const active = match?.params.arxivId === paper.arxiv_id;
+  // Cap the cascade at ~500ms — later rows don't need to wait a full second.
+  // 35ms × idx gives a snappy stagger that finishes quickly for typical lists.
+  const delay =
+    typeof enterIndex === "number" ? Math.min(enterIndex, 14) * 35 : 0;
   return (
     <Link
       id={`paper-row-${paper.arxiv_id}`}
@@ -83,8 +93,9 @@ export function PaperRow({ paper, isActiveRow, onFocusRequest }: Props) {
       tabIndex={isActiveRow ? 0 : -1}
       onMouseEnter={onFocusRequest}
       onFocus={onFocusRequest}
+      style={{ animationDelay: `${delay}ms` }}
       className={[
-        "flex items-center gap-2.5 px-3.5 py-2 border-t border-white/5 transition-all duration-200 hover-lift",
+        "fade-up flex items-center gap-2.5 px-3.5 py-2 border-t border-white/5 transition-all duration-200 hover-lift",
         "hover:bg-white/[0.03] hover:translate-x-[2px]",
         active ? "border-l-2 border-l-[color:var(--ac1)] bg-gradient-to-r from-[color:var(--ac1-soft)] to-transparent" : "",
         isActiveRow && !active ? "ring-1 ring-inset ring-white/10 bg-white/[0.02]" : "",

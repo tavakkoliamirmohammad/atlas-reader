@@ -237,50 +237,89 @@ function StreamingMessageImpl({ role, content, isStreaming, model }: Props) {
         : base;
   }
 
+  // New layout rationale:
+  // - Assistant: no bubble. A thin 2px accent rule hugs the left edge; the
+  //   model label "hangs" above the text as a byline (editorial imprint
+  //   vibe that matches the brand). While streaming, the rule flows
+  //   cyan→emerald so the eye has a live cue without a spinner.
+  // - User: kept a rounded gradient bubble for contrast, but pulled the
+  //   border off so it doesn't read as a generic chat balloon — just a
+  //   soft gradient tag with the first-person text inside.
+  // This keeps the left/right directionality so threads read naturally,
+  // while ditching the "two pills on opposite sides" cliché.
   return (
-    <div ref={ref} className={`flex fade-up ${isUser ? "justify-end" : "justify-start"}`}>
-      <div
-        className={[
-          "max-w-[90%] rounded-xl px-3 py-2 text-[13px] leading-relaxed",
-          isUser
-            ? "text-[color:var(--user-ink)] font-medium whitespace-pre-wrap"
-            : "bg-white/[0.04] border border-white/5 text-slate-200 markdown-body",
-        ].join(" ")}
-        style={isUser ? { background: "var(--user-grad)" } : undefined}
-      >
-        {!isUser && model && (
-          <div className="mb-1.5">
-            <span
-              className={`${pillClass(model)} inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider`}
-              title={`Response from ${pillLabel(model)}`}
-            >
+    <div ref={ref} className={`fade-up flex ${isUser ? "justify-end" : "justify-start"}`}>
+      {isUser ? (
+        <div
+          className="max-w-[85%] rounded-2xl px-3.5 py-2 text-[13px] leading-relaxed text-[color:var(--user-ink)] font-medium whitespace-pre-wrap"
+          style={{
+            background: "var(--user-grad)",
+            boxShadow: "0 6px 18px -10px var(--ac1-strong)",
+          }}
+        >
+          {content}
+        </div>
+      ) : (
+        <div
+          className={[
+            "relative max-w-[92%] pl-4 pr-3 py-2 rounded-lg transition-colors",
+            // A subtle fill when the message is streaming so the user has
+            // a visible container filling with text. Finished messages lose
+            // the fill so they don't all look "live."
+            isStreaming
+              ? "bg-white/[0.035] ring-1 ring-[color:var(--ac1-mid)]"
+              : "bg-white/[0.015]",
+          ].join(" ")}
+        >
+          <span
+            aria-hidden
+            className={[
+              "absolute left-0 top-2 bottom-2 w-[3px] rounded-full",
+              isStreaming ? "msg-rule-streaming" : "msg-rule-static",
+            ].join(" ")}
+          />
+          {model && (
+            <div className="mb-1.5 flex items-center gap-2">
               <span
-                aria-hidden
-                className="msg-pill-dot inline-block w-1.5 h-1.5 rounded-full"
-              />
-              {pillLabel(model)}
-            </span>
+                className={`${pillClass(model)} inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider`}
+                title={`Response from ${pillLabel(model)}`}
+              >
+                <span
+                  aria-hidden
+                  className={[
+                    "msg-pill-dot inline-block w-1.5 h-1.5 rounded-full",
+                    isStreaming ? "pulse-dot" : "",
+                  ].join(" ")}
+                />
+                {pillLabel(model)}
+              </span>
+              {isStreaming && (
+                <span className="text-[10px] uppercase tracking-wider text-[color:var(--ac1)]">
+                  streaming
+                </span>
+              )}
+            </div>
+          )}
+          <div className="text-[13px] leading-relaxed text-slate-200 markdown-body">
+            {showLoading ? (
+              <span className="inline-flex items-center gap-2 text-slate-400 text-xs">
+                <span
+                  className="inline-block w-3 h-3 rounded-full border-2 border-current border-t-transparent animate-spin"
+                  aria-hidden
+                />
+                <span>{thinkingLabel}</span>
+                <span className="inline-flex gap-0.5">
+                  <span className="w-1 h-1 rounded-full bg-current animate-bounce" style={{ animationDelay: "0ms" }} />
+                  <span className="w-1 h-1 rounded-full bg-current animate-bounce" style={{ animationDelay: "150ms" }} />
+                  <span className="w-1 h-1 rounded-full bg-current animate-bounce" style={{ animationDelay: "300ms" }} />
+                </span>
+              </span>
+            ) : (
+              <StreamedMarkdown content={content} isStreaming={!!isStreaming} />
+            )}
           </div>
-        )}
-        {showLoading ? (
-          <span className="inline-flex items-center gap-2 text-slate-400 text-xs">
-            <span
-              className="inline-block w-3 h-3 rounded-full border-2 border-current border-t-transparent animate-spin"
-              aria-hidden
-            />
-            <span>{thinkingLabel}</span>
-            <span className="inline-flex gap-0.5">
-              <span className="w-1 h-1 rounded-full bg-current animate-bounce" style={{ animationDelay: "0ms" }} />
-              <span className="w-1 h-1 rounded-full bg-current animate-bounce" style={{ animationDelay: "150ms" }} />
-              <span className="w-1 h-1 rounded-full bg-current animate-bounce" style={{ animationDelay: "300ms" }} />
-            </span>
-          </span>
-        ) : isUser ? (
-          content
-        ) : (
-          <StreamedMarkdown content={content} isStreaming={!!isStreaming} />
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }
