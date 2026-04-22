@@ -800,33 +800,70 @@ html[data-motion="off"] .shimmer-hover:hover {
 }
 
 /* ---------- pdf.js text layer ----------
-   Minimal styles so the transparent <span> elements emitted by pdfjs's
-   TextLayer overlay the rendered canvas pixel-perfectly and stay selectable.
-   We keep them invisible (color: transparent) — only the browser's selection
-   paint shows through, tinted to match the accent color. */
-.pdf-text-layer {
+   pdfjs v5's TextLayer class emits spans sized via CSS custom properties:
+   each span carries `--font-height` / `--scale-x` / `--rotate`, and relies
+   on the container rule below to resolve those into `font-size` + `transform`.
+   The container also carries `--total-scale-factor` (page zoom) and
+   `--min-font-size` (set by TextLayer itself). Without the calc() rule,
+   spans fall back to the browser's default 16px with no transform — their
+   hit rects become huge and misaligned with the canvas, so dragging one
+   word visually selects a whole paragraph. Class name is `textLayer` to
+   match what pdfjs assumes internally. */
+.textLayer {
   position: absolute;
   inset: 0;
-  overflow: hidden;
-  line-height: 1.0;
+  overflow: clip;
+  line-height: 1;
   text-align: initial;
   pointer-events: auto;
   cursor: text;
+  transform-origin: 0 0;
+  forced-color-adjust: none;
+  z-index: 0;
+
+  /* `--min-font-size` is injected by pdfjs TextLayer on construction.
+     We compose it with `--total-scale-factor` (we set that per page). */
+  --text-scale-factor: calc(var(--total-scale-factor) * var(--min-font-size, 1));
+  --min-font-size-inv: calc(1 / var(--min-font-size, 1));
 }
-.pdf-text-layer :is(span, br) {
+.textLayer :is(span, br) {
   color: transparent;
   position: absolute;
   white-space: pre;
   cursor: text;
   transform-origin: 0% 0%;
 }
-.pdf-text-layer span::selection {
-  background: rgba(34, 211, 238, 0.35);
-  color: transparent;
+/* Critical: per-span sizing using the custom properties pdfjs writes on each
+   span. Without this rule, selection hit-testing is wildly off. */
+.textLayer > :not(.markedContent),
+.textLayer .markedContent span:not(.markedContent) {
+  z-index: 1;
+  --font-height: 0;
+  font-size: calc(var(--text-scale-factor) * var(--font-height));
+  --scale-x: 1;
+  --rotate: 0deg;
+  transform: rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv));
 }
-.pdf-text-layer span::-moz-selection {
+.textLayer .markedContent { display: contents; }
+.textLayer span[role="img"] { user-select: none; cursor: default; }
+.textLayer ::selection {
   background: rgba(34, 211, 238, 0.35);
-  color: transparent;
 }
-.pdf-text-layer br::selection { background: transparent; }
-.pdf-text-layer br::-moz-selection { background: transparent; }
+.textLayer ::-moz-selection {
+  background: rgba(34, 211, 238, 0.35);
+}
+.textLayer br::selection { background: transparent; }
+.textLayer br::-moz-selection { background: transparent; }
+/* `endOfContent` is an empty sentinel div pdfjs's viewer repositions during
+   drag-select to cap the selection at the bottom of the page. We append one
+   per text layer and toggle `.selecting` on pointerdown so the CSS anchor
+   applies. */
+.textLayer .endOfContent {
+  display: block;
+  position: absolute;
+  inset: 100% 0 0;
+  z-index: 0;
+  cursor: default;
+  user-select: none;
+}
+.textLayer.selecting .endOfContent { top: 0; }

@@ -188,7 +188,7 @@ export function PdfViewport({
     // overwrite it — the "click a paper, PDF doesn't update" bug.
     pageRefs.current.forEach((wrap) => {
       wrap.querySelector("canvas.pdf-canvas")?.remove();
-      wrap.querySelector(".pdf-text-layer")?.remove();
+      wrap.querySelector(".textLayer")?.remove();
     });
     pageRefs.current.clear();
 
@@ -398,7 +398,7 @@ export function PdfViewport({
           if (evictWrap) {
             // Drop canvas + text layer to free memory; placeholder remains.
             evictWrap.querySelector("canvas.pdf-canvas")?.remove();
-            evictWrap.querySelector(".pdf-text-layer")?.remove();
+            evictWrap.querySelector(".textLayer")?.remove();
           }
         }
       } catch (err: unknown) {
@@ -453,7 +453,7 @@ export function PdfViewport({
     renderTasksRef.current.clear();
     pageRefs.current.forEach((wrap) => {
       wrap.querySelector("canvas.pdf-canvas")?.remove();
-      wrap.querySelector(".pdf-text-layer")?.remove();
+      wrap.querySelector(".textLayer")?.remove();
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pages]);
@@ -860,26 +860,11 @@ async function renderTextLayerFor(
   wrap: HTMLElement,
 ) {
   // Drop any previous text layer for this page.
-  wrap.querySelector(".pdf-text-layer")?.remove();
+  wrap.querySelector(".textLayer")?.remove();
   const textContent = await page.getTextContent();
   const textDiv = document.createElement("div");
-  textDiv.className = "pdf-text-layer";
-  // Style mirrors pdfjs's standard text-layer CSS: transparent absolutely-
-  // positioned spans overlaid on the canvas. We keep the spans interactive so
-  // native text selection works.
-  textDiv.style.position = "absolute";
-  textDiv.style.inset = "0";
-  textDiv.style.overflow = "hidden";
-  textDiv.style.opacity = "1";
-  textDiv.style.lineHeight = "1.0";
-  textDiv.style.userSelect = "text";
-  textDiv.style.color = "transparent";
-  // pdfjs's TextLayer sizes spans via `calc(... * var(--total-scale-factor))`
-  // which expands to `--scale-factor * --user-unit`. Set both so spans align
-  // with the canvas regardless of the host stylesheet.
-  textDiv.style.setProperty("--scale-factor", String(viewport.scale));
+  textDiv.className = "textLayer";
   textDiv.style.setProperty("--total-scale-factor", String(viewport.scale));
-  textDiv.style.setProperty("--user-unit", "1");
   wrap.appendChild(textDiv);
 
   const layer = new pdfjsLib.TextLayer({
@@ -892,6 +877,22 @@ async function renderTextLayerFor(
   } catch {
     /* noop — text layer rendering can fail on protected docs */
   }
+
+  // Bound drag-selection to this page: append an `endOfContent` sentinel and
+  // toggle the `.selecting` class on pointerdown so the CSS rule
+  // `.textLayer.selecting .endOfContent { top: 0 }` activates. Without this,
+  // a selection that starts inside one page's spans extends past the last
+  // span and grabs adjacent pages' content — the "select a word, get a
+  // paragraph" bug. This replicates what pdfjs's own TextLayerBuilder does.
+  const endOfContent = document.createElement("div");
+  endOfContent.className = "endOfContent";
+  textDiv.appendChild(endOfContent);
+  textDiv.addEventListener("pointerdown", () => {
+    textDiv.classList.add("selecting");
+    const clear = () => textDiv.classList.remove("selecting");
+    document.addEventListener("pointerup", clear, { once: true });
+    window.addEventListener("blur", clear, { once: true });
+  });
 }
 
 type OutlineNode = {
