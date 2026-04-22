@@ -27,7 +27,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
       - name: Run pytest
-        run: pytest -v --deselect backend/tests/test_e2e_ai.py::test_full_ai_round_trip
+        run: pytest -v
 
   frontend:
     name: Frontend tests

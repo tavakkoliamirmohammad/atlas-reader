@@ -10,7 +10,7 @@ function timeOfDay(): "morning" | "afternoon" | "evening" | "night" {
   return "night";
 }
 
-export function Greeting({ name = "Amir" }: { name?: string }) {
+export function Greeting({ name }: { name?: string }) {
   const [fresh, setFresh] = useState<number | null>(null);
   useEffect(() => {
     fetch(u("/api/health"))
@@ -28,7 +28,7 @@ export function Greeting({ name = "Amir" }: { name?: string }) {
 
   return (
     <div className="text-sm text-slate-300">
-      <span className="font-medium text-slate-100">{greet}, {name}</span>
+      <span className="font-medium text-slate-100">{name ? `${greet}, ${name}` : greet}</span>
       {fresh !== null && fresh > 0 && (
         <span className="text-slate-400">
           {" "}· <span className="text-slate-200">{fresh}</span> fresh paper{fresh === 1 ? "" : "s"} ready

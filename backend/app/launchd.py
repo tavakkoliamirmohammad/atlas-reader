@@ -10,7 +10,7 @@ from pathlib import Path
 from app import db
 
 
-LABEL = "com.amir.atlas"
+LABEL = "app.atlas.runner"
 
 
 def plist_path() -> Path:

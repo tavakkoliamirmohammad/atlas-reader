@@ -1,65 +1,86 @@
 # Atlas
 
-Local-first paper reviewer. Uses your own `codex` / `claude` CLI subscription — **$0 API cost**.
+> A local-first daily reviewer for arXiv papers in compilers, PL, and MLIR.
+> Uses *your* `codex` or `claude` CLI subscription — **no API keys, \$0 recurring cost**.
 
-## One-time setup
+![CI](https://img.shields.io/github/actions/workflow/status/OWNER/REPO/ci.yml?branch=main)
+![License](https://img.shields.io/badge/license-MIT-blue)
+
+Atlas fetches today's arXiv papers in the categories you care about, gives each a deep 10-section summary on demand, lets you highlight + ask follow-ups, and remembers everything locally. All AI work is done by spawning your own `codex` / `claude` CLI, so nothing leaves your machine and nothing is billed to an API account.
+
+![Atlas screenshot](docs/screenshot.png)
+<!-- Drop your own screenshot at docs/screenshot.png (or a demo.gif), or replace this line with a YouTube/Loom link. -->
+
+## Quick start
 
 ```bash
-git clone <repo> paper-dashboard && cd paper-dashboard
+git clone https://github.com/OWNER/REPO atlas && cd atlas
 python3.12 -m venv .venv && source .venv/bin/activate
-pip install -e .                          # installs the `atlas` CLI
-codex login                               # or: run `claude` once
+pip install -e .                           # installs the `atlas` CLI
 cd frontend && pnpm install && cd ..
+codex login                                # or run `claude` once
+atlas up-docker                            # http://localhost:8765
 ```
 
-## Run
+`atlas up-docker` starts the host AI runner, builds + starts the backend/frontend container, and opens the browser. Stop with `atlas down-docker`.
+
+## Run modes
 
 | Mode | Command | URL |
 | --- | --- | --- |
-| **Dev** (hot reload) | `atlas start-runner` + `cd frontend && pnpm dev` + `uvicorn app.main:app --reload --port 8765` | http://localhost:5173 |
-| **Production** (Docker) | `atlas up-docker` | http://localhost:8765 |
-| **Production** (native) | `atlas up` | http://localhost:8765 |
-| **Production** (hosted UI + local backend) | `atlas start` | hosted URL (see below) |
+| **Docker** (recommended) | `atlas up-docker` | http://localhost:8765 |
+| **Native** | `atlas up` | http://localhost:8765 |
+| **Dev** (hot reload) | `atlas start-runner` + `pnpm --dir frontend dev` + `uvicorn app.main:app --reload --port 8765` | http://localhost:5173 |
+| **Hosted UI + local backend** | `atlas start` | hosted URL (see below) |
 
-Stop: `atlas down-docker` (Docker) · `atlas stop` (native).
+Status: `atlas status` · Logs: `atlas runner-logs`, `docker compose logs -f atlas`.
 
-> `atlas up-docker` starts the host AI runner (required — needs your subscription creds), builds + runs the backend/frontend container, and opens the browser. The runner stays on the host because `codex` / `claude` CLIs read the macOS Keychain and `~/.codex/` tokens; the container talks to it over `host.docker.internal:8766`.
+## Architecture
 
-Status: `atlas status` · Logs: `atlas runner-logs` · `docker compose logs -f atlas` (Docker)
+Two processes, always:
 
-## AI server only
-
-The "AI runner" is the process that wraps your `codex` / `claude` CLI. Nothing else talks to those binaries.
-
-```bash
-atlas start-runner      # binds 127.0.0.1:8766, bearer-auth'd
-atlas stop-runner
-atlas runner-logs
+```
+┌─────────────────────────────┐            ┌────────────────────────────┐
+│  Backend (container or host) │ ──HTTP──▶ │  AI runner (host only)     │
+│  FastAPI · :8765             │   NDJSON  │  Spawns codex / claude     │
+│  Serves SPA + REST + SSE     │ ◀─stream─ │  Keychain + ~/.codex here  │
+└─────────────────────────────┘            └────────────────────────────┘
+               ▲                                        ▲
+               └──────── shared ~/.atlas/ ──────────────┘
+                  (SQLite, PDFs, runner.secret)
 ```
 
-## Hosted UI (invite-only, $0)
+The runner cannot live in a container — `codex` / `claude` read your macOS Keychain and `~/.codex/` credentials. Put the backend anywhere; the runner stays on your machine. See `CLAUDE.md` for the fuller walk-through.
 
-One deploy. Every invited user runs their own `atlas start` locally; the hosted page talks to *their* `localhost:8765`. No shared AI.
+## Hosted UI (invite-only, \$0)
 
-1. Push this repo to GitHub (private is fine).
-2. **Cloudflare Pages** → Create project → connect repo
-   - Build command: `cd frontend && pnpm install && pnpm build`
-   - Build output: `frontend/dist`
-3. **Cloudflare Access** → add an Access application over the Pages URL → policy: **Emails → include** your invite list. Free up to 50 users.
-4. On the backend, set the hosted origin so CORS allows it:
-   ```bash
-   export ATLAS_CORS_ORIGINS="https://paper-dashboard.pages.dev"
-   atlas start
-   ```
-5. Each invited user: install prerequisites above, run `atlas start`, open the hosted URL.
+Deploy once, every invited user runs their own backend. The page talks to each user's `localhost:8765` — no shared AI.
+
+1. Push to GitHub (private is fine).
+2. **Cloudflare Pages** → connect repo. Build command `cd frontend && pnpm install && pnpm build`; output `frontend/dist`.
+3. **Cloudflare Access** → add an Access app over the Pages URL; policy **Emails → include** your invite list. Free up to 50 users.
+4. Users export `ATLAS_CORS_ORIGINS="https://<your-pages-url>"` before running `atlas start`.
 
 ## Data
 
-Everything under `~/.atlas/` (SQLite, PDFs, runner secret). Override with `ATLAS_DATA_DIR=/path`.
+Everything under `~/.atlas/`:
+- `atlas.db` — SQLite (papers, conversations, highlights, glossary).
+- `pdfs/` — local PDFs for custom URL/upload imports. arXiv PDFs are streamed on demand.
+- `runner.secret` — bearer token for the runner, mode 0600.
+
+Override the location with `ATLAS_DATA_DIR=/path/to/dir`.
 
 ## Tests
 
 ```bash
-pytest -q                                 # backend
-cd frontend && pnpm test:run              # frontend
+pytest -q                                # backend (171 tests)
+pnpm --dir frontend test:run             # frontend (37 tests)
 ```
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). Bug reports and design discussion welcome in issues; security reports via the Security tab (see [SECURITY.md](SECURITY.md)).
+
+## License
+
+MIT — see [LICENSE](LICENSE).
