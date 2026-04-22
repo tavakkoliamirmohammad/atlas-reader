@@ -192,7 +192,10 @@ export function PdfViewport({
     });
     pageRefs.current.clear();
 
-    const loadingTask = pdfjsLib.getDocument({ url: fileUrl });
+    // enableHWA asks the browser for a GPU-backed 2D canvas. Softness /
+    // stroke weight are unchanged vs. the software-raster path; the backing
+    // store just composites faster and scales more cleanly on HiDPI.
+    const loadingTask = pdfjsLib.getDocument({ url: fileUrl, enableHWA: true });
     loadingTask.onProgress = ({ loaded, total }: { loaded: number; total: number }) => {
       if (cancelled) return;
       setLoadPhase({ kind: "fetching", loaded, total });
@@ -365,8 +368,18 @@ export function PdfViewport({
         canvas.style.width = `${meta.width}px`;
         canvas.style.height = `${meta.height}px`;
 
-        const ctx = canvas.getContext("2d");
+        // alpha: false — the page is painted opaque white, so per-pixel
+        // alpha blending buys nothing. Opaque contexts composite slightly
+        // faster and in some browsers avoid a gamma-mismatch softening on
+        // dark backgrounds. Softness of rasterized glyphs unchanged.
+        const ctx = canvas.getContext("2d", { alpha: false });
         if (!ctx) return;
+        // "high" swaps the default bilinear downsample for a Lanczos-style
+        // filter — only matters when the canvas is scaled back to CSS px
+        // (DPR > 1 on Retina, or if we ever supersample). On DPR 1 this
+        // rule never fires, so softness on 1× displays is unchanged.
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = "high";
         const transform: [number, number, number, number, number, number] | undefined =
           dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : undefined;
 
