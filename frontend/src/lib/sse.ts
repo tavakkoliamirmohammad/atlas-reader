@@ -78,7 +78,9 @@ function decodeChunkPayload(data: string): string | null {
   try {
     const parsed = JSON.parse(data) as { t?: unknown };
     if (typeof parsed.t === "string") return parsed.t;
-    return null;
+    // Structured JSON event (e.g. video endpoint emits {"type":...}). Surface
+    // the raw JSON string so callers can parse their own schema.
+    return data;
   } catch {
     // Backwards compat: legacy backend emitted raw text in `data:`. Surface as-is.
     return data;
