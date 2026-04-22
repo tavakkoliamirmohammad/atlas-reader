@@ -17,12 +17,15 @@ cd frontend && pnpm install && cd ..
 | Mode | Command | URL |
 | --- | --- | --- |
 | **Dev** (hot reload) | `atlas start-runner` + `cd frontend && pnpm dev` + `uvicorn app.main:app --reload --port 8765` | http://localhost:5173 |
-| **Production** (local, Docker) | `atlas start-runner` then `docker compose up --build -d` | http://localhost:8765 |
+| **Production** (Docker) | `atlas up-docker` | http://localhost:8765 |
+| **Production** (native) | `atlas up` | http://localhost:8765 |
 | **Production** (hosted UI + local backend) | `atlas start` | hosted URL (see below) |
 
-Stop everything: `docker compose down && atlas stop-runner` (or `atlas stop` if using non-Docker).
+Stop: `atlas down-docker` (Docker) · `atlas stop` (native).
 
-Status: `atlas status` · Logs: `docker compose logs -f atlas` + `atlas runner-logs`
+> `atlas up-docker` starts the host AI runner (required — needs your subscription creds), builds + runs the backend/frontend container, and opens the browser. The runner stays on the host because `codex` / `claude` CLIs read the macOS Keychain and `~/.codex/` tokens; the container talks to it over `host.docker.internal:8766`.
+
+Status: `atlas status` · Logs: `atlas runner-logs` · `docker compose logs -f atlas` (Docker)
 
 ## AI server only
 

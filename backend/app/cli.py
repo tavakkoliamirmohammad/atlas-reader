@@ -236,6 +236,67 @@ def cmd_stop_runner() -> int:
     return 0
 
 
+def _have_docker() -> bool:
+    return subprocess.run(["which", "docker"], capture_output=True).returncode == 0
+
+
+def cmd_up_docker() -> int:
+    """One-command Docker startup: host runner + containerized backend/frontend.
+
+    The runner MUST stay on the host because codex/claude CLIs read macOS
+    Keychain and ~/.codex/ tokens (impossible to containerize without moving
+    to paid API keys). This command wraps the two-step startup behind one
+    invocation:
+      1. Start the host runner (idempotent; creates runner.secret/env).
+      2. `docker compose up --build -d` for backend + frontend.
+      3. Wait for http://localhost:8765/api/health to come up.
+      4. Open browser.
+    """
+    if not _have_docker():
+        print("docker not found on PATH; install Docker Desktop first", file=sys.stderr)
+        return 1
+
+    # A native backend on :8765 would clash with the container's published port.
+    if (pid := _read_pid(_backend_pid_file())) and _is_alive(pid):
+        print(f"native backend is running (pid {pid}); stopping so Docker can bind :{PORT}")
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        _backend_pid_file().unlink(missing_ok=True)
+        time.sleep(0.5)
+
+    _start_runner()
+
+    print("building and starting containers (docker compose up --build -d)...")
+    proc = subprocess.run(
+        ["docker", "compose", "up", "--build", "-d"],
+        cwd=_project_root(),
+    )
+    if proc.returncode != 0:
+        print(f"docker compose failed (exit {proc.returncode})", file=sys.stderr)
+        return proc.returncode
+
+    if _wait_for_health(timeout=30):
+        print(f"ready: http://localhost:{PORT}")
+        webbrowser.open(f"http://localhost:{PORT}")
+        return 0
+    print(
+        f"container didn't respond on http://localhost:{PORT} within 30s; "
+        "try `docker compose logs atlas`",
+        file=sys.stderr,
+    )
+    return 1
+
+
+def cmd_down_docker() -> int:
+    """Tear down Docker stack + host runner started by `up-docker`."""
+    if _have_docker():
+        subprocess.run(["docker", "compose", "down"], cwd=_project_root())
+    _stop_runner()
+    return 0
+
+
 def cmd_doctor() -> int:
     """Print the live security posture of the runner + backend."""
     print("=== Atlas doctor ===")
@@ -273,7 +334,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     for name in (
         "start", "stop", "status", "logs", "runner-logs",
         "start-runner", "stop-runner",
-        "open", "restart", "up", "doctor",
+        "open", "restart", "up", "up-docker", "down-docker", "doctor",
         "install-launchd", "uninstall-launchd",
     ):
         sub.add_parser(name)
@@ -289,6 +350,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         "open":              cmd_open,
         "restart":           cmd_restart,
         "up":                cmd_up,
+        "up-docker":         cmd_up_docker,
+        "down-docker":       cmd_down_docker,
         "doctor":            cmd_doctor,
         "install-launchd":   cmd_install_launchd,
         "uninstall-launchd": cmd_uninstall_launchd,
