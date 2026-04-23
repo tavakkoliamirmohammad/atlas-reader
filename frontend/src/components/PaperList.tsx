@@ -314,7 +314,7 @@ export function PaperList() {
   return (
     <div className="flex flex-col h-full">
       <div className="px-4 py-3">
-        <div className="text-[11px] uppercase tracking-wider text-slate-500">Today {"\u00b7"} {new Date().toLocaleDateString(undefined, { month: "short", day: "numeric" })}</div>
+        <div className="text-[11px] uppercase tracking-wider text-slate-400">Today {"\u00b7"} {new Date().toLocaleDateString(undefined, { month: "short", day: "numeric" })}</div>
       </div>
       <UrlBar onSubmit={(id) => navigate(`/reader/${id}`)} />
       <div className="px-2 pb-2 relative">
