@@ -2,7 +2,13 @@
 name = "atlas"
 version = "0.1.0"
 description = "Local-first paper reviewer with on-demand AI features"
+readme = "README.md"
 requires-python = ">=3.12"
+license = { text = "PolyForm-Noncommercial-1.0.0" }
+authors = [
+    { name = "Amir Mohammad Tavakkoli" },
+]
+urls = { Homepage = "https://github.com/tavakkoliamirmohammad/atlas-reader", Issues = "https://github.com/tavakkoliamirmohammad/atlas-reader/issues" }
 dependencies = [
     "fastapi>=0.110",
     "uvicorn[standard]>=0.27",

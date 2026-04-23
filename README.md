@@ -3,18 +3,16 @@
 > A local-first daily reviewer for arXiv papers in compilers, PL, and MLIR.
 > Uses *your* `codex` or `claude` CLI subscription — **no API keys, \$0 recurring cost**.
 
-![CI](https://img.shields.io/github/actions/workflow/status/OWNER/REPO/ci.yml?branch=main)
-![License](https://img.shields.io/badge/license-MIT-blue)
+![License](https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-orange)
 
 Atlas fetches today's arXiv papers in the categories you care about, gives each a deep 10-section summary on demand, lets you highlight + ask follow-ups, and remembers everything locally. All AI work is done by spawning your own `codex` / `claude` CLI, so nothing leaves your machine and nothing is billed to an API account.
 
 ![Atlas screenshot](docs/screenshot.png)
-<!-- Drop your own screenshot at docs/screenshot.png (or a demo.gif), or replace this line with a YouTube/Loom link. -->
 
 ## Quick start
 
 ```bash
-git clone https://github.com/OWNER/REPO atlas && cd atlas
+git clone https://github.com/tavakkoliamirmohammad/atlas-reader atlas && cd atlas
 python3.12 -m venv .venv && source .venv/bin/activate
 pip install -e .                           # installs the `atlas` CLI
 cd frontend && pnpm install && cd ..
@@ -83,4 +81,6 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). Bug reports and design discussion welcom
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+**[PolyForm Noncommercial 1.0.0](LICENSE)** — personal, research, hobby, educational, charitable, and non-profit use only. **No commercial use.** Software is provided as-is, with no warranty and no obligation on the author to fix bugs or provide support. See [LICENSE](LICENSE) for the full terms.
+
+If you want a commercial license, open an issue.

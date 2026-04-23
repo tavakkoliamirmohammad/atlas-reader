@@ -1,7 +1,14 @@
 {
-  "name": "frontend",
+  "name": "atlas-frontend",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.1.0",
+  "description": "Frontend for Atlas — a local-first arXiv paper reviewer.",
+  "license": "SEE LICENSE IN ../LICENSE",
+  "author": "Amir Mohammad Tavakkoli",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tavakkoliamirmohammad/atlas-reader.git"
+  },
   "type": "module",
   "scripts": {
     "dev": "vite",
