@@ -45,6 +45,50 @@ async def _run_text(
     return "".join(parts)
 
 
+def _clean_definition(raw: str, term: str) -> str:
+    """Strip meta-preamble from a definition.
+
+    Models sometimes prepend lines like "Using the Superpowers workflow to
+    keep the response constrained..." or "Here's the definition:" before the
+    actual sentence. We split on sentence boundaries and return from the
+    first sentence that contains the term (case-insensitive substring).
+    Falls back to stripping the last sentence if the term isn't found.
+    """
+    import re
+
+    text = raw.strip()
+    # Strip code fences and optional language tag (```json, ```text, etc.).
+    if text.startswith("```"):
+        text = text.strip("`").strip()
+        first_nl = text.find("\n")
+        if first_nl != -1 and len(text[:first_nl].split()) <= 1:
+            text = text[first_nl + 1 :]
+        if text.endswith("```"):
+            text = text[:-3]
+        text = text.strip()
+
+    # Split into sentences on ". " keeping the period. Naive but good enough.
+    sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", text) if s.strip()]
+    if not sentences:
+        return text
+
+    # Normalize term for lookup — lowercase, collapse whitespace, strip punct.
+    term_norm = re.sub(r"\s+", " ", term.strip().lower())
+    # Also try a dash-less variant so "chiplet-task" matches "chiplet task".
+    term_loose = term_norm.replace("-", " ").replace("_", " ")
+
+    def _contains_term(s: str) -> bool:
+        sl = s.lower()
+        return term_norm in sl or term_loose in re.sub(r"[-_]", " ", sl)
+
+    for i, s in enumerate(sentences):
+        if _contains_term(s):
+            return " ".join(sentences[i:]).strip()
+
+    # Term never appears — last sentence is usually the least-meta one.
+    return sentences[-1]
+
+
 def _parse_terms(raw: str) -> list[str]:
     """Best-effort JSON-array parse of the extractor output.
 
@@ -137,11 +181,15 @@ async def define(
             return row["definition"]
 
     prompt = (
-        f"In ONE sentence (max 25 words), explain '{term}' for a compilers "
-        f"PhD student. No preface, no quotes, just the sentence."
+        f"Define '{term}' for a compilers PhD student in ONE sentence (max "
+        f"25 words).\n\n"
+        f"Respond ONLY with the sentence. Start with the term itself or a "
+        f"noun phrase. No preamble, no meta-commentary, no 'I'll now define', "
+        f"no 'Here is', no 'Using the', no workflow narration, no tool "
+        f"narration, no closing remarks. Just the sentence."
     )
     raw = await _run_text("Define the term.", prompt, backend=backend)
-    definition = raw.strip()
+    definition = _clean_definition(raw, term)
     if not definition:
         definition = f"(no definition available for '{term}')"
 

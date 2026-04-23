@@ -159,3 +159,39 @@ async def test_define_inserts_row_when_term_was_never_extracted(atlas_data_dir):
 def test_list_for_returns_empty_for_unknown_paper(atlas_data_dir):
     db.init()
     assert glossary.list_for("never-seen") == []
+
+
+# --- _clean_definition ---------------------------------------------------
+
+def test_clean_definition_strips_meta_preamble():
+    raw = (
+        "Using the Superpowers workflow to keep the response constrained to the "
+        "exact format you asked for. Chiplet-task is a compilation unit or work "
+        "item designed to be mapped, scheduled, and communicated across multiple "
+        "chiplets in a heterogeneous package."
+    )
+    out = glossary._clean_definition(raw, "Chiplet-task")
+    assert out.startswith("Chiplet-task is a compilation unit")
+    assert "Superpowers workflow" not in out
+
+
+def test_clean_definition_returns_full_sentence_when_clean():
+    raw = "Infinity Cache is AMD's 256 MB on-package last-level cache shared across chiplets."
+    assert glossary._clean_definition(raw, "Infinity Cache") == raw
+
+
+def test_clean_definition_matches_loose_dashes():
+    raw = "Here is the answer. A chiplet task is a unit of work mapped to one chiplet."
+    out = glossary._clean_definition(raw, "Chiplet-task")
+    assert out.startswith("A chiplet task")
+
+
+def test_clean_definition_strips_code_fences():
+    raw = "```\nFoo is a bar.\n```"
+    assert glossary._clean_definition(raw, "Foo") == "Foo is a bar."
+
+
+def test_clean_definition_falls_back_to_last_sentence_when_term_missing():
+    raw = "I'll now explain this. Here is the answer you requested."
+    out = glossary._clean_definition(raw, "SomeUnrelatedTerm")
+    assert out == "Here is the answer you requested."
