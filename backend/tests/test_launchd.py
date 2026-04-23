@@ -44,3 +44,10 @@ def test_uninstall_is_no_op_when_plist_absent(tmp_path, monkeypatch):
     monkeypatch.setattr(launchd, "_bootout", lambda: None)
     out = launchd.uninstall()
     assert "not installed" in out
+
+
+def test_plist_invokes_atlas_up_not_start():
+    content = launchd.render_plist()
+    assert "<string>up</string>" in content
+    # The removed subcommand must not appear.
+    assert "<string>start</string>" not in content

@@ -32,7 +32,7 @@ def render_plist() -> str:
         <string>{python}</string>
         <string>-m</string>
         <string>app.cli</string>
-        <string>start</string>
+        <string>up</string>
     </array>
     <key>RunAtLoad</key>
     <true/>
