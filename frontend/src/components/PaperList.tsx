@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ChevronDown, ChevronRight } from "lucide-react";
-import { api, type Paper } from "@/lib/api";
+import { ChevronDown, ChevronRight, RefreshCcw } from "lucide-react";
+import { api, refreshDigest, type Paper } from "@/lib/api";
 import { groupPapersByDay } from "@/lib/group-by-day";
 import { useUiStore, type DigestRange } from "@/stores/ui-store";
 import { UrlBar } from "./UrlBar";
@@ -41,6 +41,13 @@ export function PaperList() {
   const [activeIndex, setActiveIndex] = useState(0);
   const [rangeCounts, setRangeCounts] = useState<RangeCounts | null>(null);
   const [filter, setFilter] = useState("");
+  // Increments each successful manual refresh to re-trigger the list-fetch
+  // effect below (same pattern used elsewhere in the app for ephemeral
+  // cross-component action signals — see ui-store action-id counters).
+  const [refreshTick, setRefreshTick] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshInfo, setRefreshInfo] = useState<string | null>(null);
+  const refreshInfoTimerRef = useRef<number | null>(null);
   // Days the user has collapsed. Keyed by isoDate so a given day stays collapsed
   // across re-renders. Reset on range switch because the dayGroups themselves
   // change shape — keeping stale keys around is harmless but clearing makes the
@@ -106,11 +113,54 @@ export function PaperList() {
       }
     })();
     return () => { cancelled = true; };
-  }, [digestRange]);
+  }, [digestRange, refreshTick]);
 
-  // One-time background fetch for the full archive so every segment can show a
-  // real count without forcing the user to switch ranges. If the initial range
-  // is already "all", the primary effect above has already populated counts.
+  // Clear any pending "refresh info" flash on unmount so the timer doesn't
+  // fire after the component is gone.
+  useEffect(() => {
+    return () => {
+      if (refreshInfoTimerRef.current !== null) {
+        window.clearTimeout(refreshInfoTimerRef.current);
+      }
+    };
+  }, []);
+
+  function flashRefreshInfo(msg: string) {
+    setRefreshInfo(msg);
+    if (refreshInfoTimerRef.current !== null) {
+      window.clearTimeout(refreshInfoTimerRef.current);
+    }
+    refreshInfoTimerRef.current = window.setTimeout(() => {
+      setRefreshInfo(null);
+      refreshInfoTimerRef.current = null;
+    }, 3000);
+  }
+
+  async function onRefresh() {
+    if (refreshing) return;
+    setRefreshing(true);
+    try {
+      const r = await refreshDigest();
+      // Re-fetch the list + all-range counts so the UI reflects any newly
+      // landed papers without waiting for the user to switch ranges.
+      setRangeCounts(null);
+      setRefreshTick((t) => t + 1);
+      flashRefreshInfo(
+        r.new > 0
+          ? `${r.new} new paper${r.new === 1 ? "" : "s"}`
+          : "Already up to date",
+      );
+    } catch (e) {
+      flashRefreshInfo(`Refresh failed: ${(e as Error).message}`);
+    } finally {
+      setRefreshing(false);
+    }
+  }
+
+  // Background fetch for the full archive so every segment can show a real
+  // count without forcing the user to switch ranges. Also re-runs after a
+  // manual refresh (`refreshTick` bump) because `onRefresh` clears
+  // rangeCounts to null so the guard below lets it fire.
   useEffect(() => {
     if (rangeCounts) return;
     let cancelled = false;
@@ -123,9 +173,8 @@ export function PaperList() {
       }
     })();
     return () => { cancelled = true; };
-    // Deliberately runs only on mount — the "all" fetch is a one-shot.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [refreshTick]);
 
   // Measure the active segment so the sliding indicator lines up precisely.
   // Re-run on range change and on container resize (left panel collapse).
@@ -314,24 +363,44 @@ export function PaperList() {
   return (
     <div className="flex flex-col h-full">
       <div className="px-4 py-3">
-        <div className="text-[11px] uppercase tracking-wider text-slate-400">Today {"\u00b7"} {new Date().toLocaleDateString(undefined, { month: "short", day: "numeric" })}</div>
+        <div className="flex items-center justify-between">
+          <div className="text-[11px] uppercase tracking-wider text-slate-400">Today {"\u00b7"} {new Date().toLocaleDateString(undefined, { month: "short", day: "numeric" })}</div>
+          <button
+            type="button"
+            onClick={onRefresh}
+            disabled={refreshing}
+            title="Refresh from arXiv"
+            aria-label="Refresh from arXiv"
+            className="rounded p-1 text-slate-400 hover:text-slate-200 hover:bg-white/[0.06] disabled:opacity-50 transition-colors cursor-pointer"
+          >
+            <RefreshCcw
+              className={`h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`}
+              aria-hidden
+            />
+          </button>
+        </div>
+        {refreshInfo && (
+          <div role="status" className="mt-1 text-[10px] text-slate-400">
+            {refreshInfo}
+          </div>
+        )}
       </div>
       <UrlBar onSubmit={(id) => navigate(`/reader/${id}`)} />
       <div className="px-2 pb-2 relative">
         <input
-          type="search"
+          type="text"
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
           placeholder="Filter in range…"
           aria-label="Filter papers in current range"
-          className="w-full text-[12px] px-2.5 py-1.5 rounded-lg bg-white/[0.03] border border-white/5 placeholder:text-slate-500 text-slate-100 focus:outline-none focus:border-[color:var(--ac1-mid)] transition-colors"
+          className={`w-full text-[12px] py-1.5 rounded-lg bg-white/[0.03] border border-white/5 placeholder:text-slate-500 text-slate-100 focus:outline-none focus:border-[color:var(--ac1-mid)] transition-colors ${filter ? "pl-2.5 pr-7" : "px-2.5"}`}
         />
         {filter && (
           <button
             type="button"
             aria-label="Clear filter"
             onClick={() => setFilter("")}
-            className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 text-[14px] cursor-pointer"
+            className="absolute right-2 top-1/2 -translate-y-1/2 inline-flex h-5 w-5 items-center justify-center rounded text-slate-400 hover:text-slate-200 hover:bg-white/[0.06] text-[14px] leading-none cursor-pointer transition-colors"
           >
             ×
           </button>

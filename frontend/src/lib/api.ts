@@ -58,6 +58,19 @@ export const api = {
   pdfUrl:  (id: string) => u(`/api/pdf/${encodeURIComponent(id)}`),
 };
 
+export interface DigestRefreshResult {
+  date: string;
+  new: number;
+  total_papers: number;
+  duration_ms: number;
+}
+
+export async function refreshDigest(): Promise<DigestRefreshResult> {
+  const r = await fetch(u("/api/digest/refresh"), { method: "POST" });
+  if (!r.ok) throw new Error(`refreshDigest ${r.status}: ${await r.text()}`);
+  return r.json();
+}
+
 export type ModelChoice = "opus" | "sonnet" | "haiku";
 
 // Codex models mirror backend/app/ai_argv.CODEX_MODELS. Keep in sync with what

@@ -6,7 +6,9 @@ import asyncio
 import dataclasses
 import json
 import os
+import time as _time
 from contextlib import asynccontextmanager
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import httpx
@@ -37,93 +39,73 @@ from app import (
 from fastapi import UploadFile, File, Form
 
 
-async def _daily_build_loop() -> None:
-    """Twice-daily build + maintenance sweeps.
+async def _startup_catchup() -> None:
+    """If the last digest build was more than 6h ago, refresh once in the
+    background. Covers the case where the machine was off at the arXiv
+    publication window.
 
-    1. Build today's digest if missing/stale. arXiv publishes new abstracts
-       once per day (~00:00 ET). Running at 07:00 and 14:00 local covers the
-       day's batch plus any late corrections, without spamming the API.
-    2. Prune orphan PDFs — cached bytes with no `papers` row pointing at them.
-    3. If `ATLAS_CHAT_RETENTION_DAYS` is set, prune old chat messages.
+    Also runs the cheap maintenance sweeps (orphan-PDF prune + optional
+    chat-retention prune) once at startup regardless of digest freshness.
     """
     import logging
-    from datetime import date, datetime, time as dtime, timedelta
+
     log = logging.getLogger("atlas.scheduler")
-
-    SLOTS = (dtime(7, 0), dtime(14, 0))
-
-    def _next_slot() -> datetime:
-        now = datetime.now()
-        today_slots = [datetime.combine(now.date(), s) for s in SLOTS]
-        future = [t for t in today_slots if t > now]
-        return future[0] if future else today_slots[0] + timedelta(days=1)
-
-    async def _do_build(reason: str) -> None:
-        try:
-            await digest.build_today()
-            log.info("scheduler: build complete (%s)", reason)
-        except Exception as e:                         # noqa: BLE001
-            log.warning("scheduler: build failed: %s: %s", type(e).__name__, e)
-
-    async def _do_sweeps() -> None:
-        try:
-            orphans = conversations.prune_orphan_pdfs()
-            if orphans:
-                log.info("scheduler: removed %d orphan PDF(s)", orphans)
-        except Exception:                             # noqa: BLE001
-            log.exception("scheduler: orphan-pdf sweep failed")
-
-        retention_env = os.environ.get("ATLAS_CHAT_RETENTION_DAYS")
-        if retention_env:
-            try:
-                days = int(retention_env)
-                if days > 0:
-                    deleted = conversations.prune_older_than(days)
-                    if deleted:
-                        log.info("scheduler: pruned %d chat message(s) older than %dd",
-                                 deleted, days)
-            except ValueError:
-                log.warning("scheduler: ATLAS_CHAT_RETENTION_DAYS=%r not an int; skipped",
-                            retention_env)
-            except Exception:                         # noqa: BLE001
-                log.exception("scheduler: chat retention sweep failed")
-
-    # Startup catch-up: if today's build hasn't landed yet, run now.
     try:
-        today = date.today().isoformat()
         with db.connect() as conn:
-            cur = conn.execute("SELECT status FROM builds WHERE date = ?", (today,))
-            row = cur.fetchone()
-        if row is None or row["status"] not in ("done", "partial"):
-            await _do_build("startup catch-up")
-            await _do_sweeps()
-    except asyncio.CancelledError:
-        raise
-    except Exception:                                  # noqa: BLE001
-        log.exception("scheduler: catch-up check failed")
+            row = conn.execute(
+                "SELECT finished_at FROM builds "
+                "WHERE finished_at IS NOT NULL "
+                "ORDER BY finished_at DESC LIMIT 1"
+            ).fetchone()
+        stale = True
+        if row and row[0]:
+            last = datetime.fromisoformat(row[0].replace("Z", "+00:00"))
+            stale = datetime.now(timezone.utc) - last > timedelta(hours=6)
+        if stale:
+            log.info("scheduler: last build >6h old (or none), refreshing")
+            await digest.build_today()
+            log.info("scheduler: catchup complete")
+        else:
+            log.info("scheduler: recent build found, skipping catchup")
+    except Exception as e:  # noqa: BLE001
+        log.warning("scheduler: catchup failed: %s: %s", type(e).__name__, e)
 
-    while True:
-        target = _next_slot()
-        delay = max((target - datetime.now()).total_seconds(), 1.0)
-        log.info("scheduler: next run at %s (%.0fs)", target.isoformat(timespec="seconds"), delay)
+    # Orphan PDF prune + optional chat retention — these are cheap,
+    # run once at startup regardless of digest freshness.
+    try:
+        orphans = conversations.prune_orphan_pdfs()
+        if orphans:
+            log.info("scheduler: pruned %d orphan PDF(s)", orphans)
+    except Exception as e:  # noqa: BLE001
+        log.warning("scheduler: prune failed: %s: %s", type(e).__name__, e)
+
+    retention_days = os.environ.get("ATLAS_CHAT_RETENTION_DAYS")
+    if retention_days:
         try:
-            await asyncio.sleep(delay)
-        except asyncio.CancelledError:
-            return
-        await _do_build("scheduled")
-        await _do_sweeps()
+            days = int(retention_days)
+            if days > 0:
+                n = conversations.prune_older_than(days)
+                if n:
+                    log.info("scheduler: pruned %d old chat messages", n)
+        except ValueError:
+            log.warning(
+                "scheduler: ATLAS_CHAT_RETENTION_DAYS=%r not an int; skipped",
+                retention_days,
+            )
+        except Exception as e:  # noqa: BLE001
+            log.warning("scheduler: chat prune failed: %s: %s", type(e).__name__, e)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     db.init()
-    scheduler_task = asyncio.create_task(_daily_build_loop())
+    catchup_task = asyncio.create_task(_startup_catchup())
     try:
         yield
     finally:
-        scheduler_task.cancel()
+        catchup_task.cancel()
         try:
-            await scheduler_task
+            await catchup_task
         except (asyncio.CancelledError, Exception):   # noqa: BLE001
             pass
 
@@ -192,6 +174,33 @@ async def get_digest(
             raise HTTPException(status_code=400, detail="days must be an integer or 'all'")
     rows = papers.list_recent(days=days_arg)
     return {"count": len(rows), "papers": [_row_to_dict(r) for r in rows]}
+
+
+@app.post("/api/digest/refresh")
+async def post_digest_refresh() -> dict:
+    """Force a fresh arXiv fetch + upsert. Idempotent when nothing is new."""
+    # Count rows before so we can report "new".
+    with db.connect() as conn:
+        row = conn.execute("SELECT COUNT(*) FROM papers").fetchone()
+        before = row[0] if row else 0
+
+    t0 = _time.monotonic()
+    try:
+        await digest.build_today()
+    except Exception as exc:                            # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"arxiv fetch failed: {exc}")
+    duration_ms = int((_time.monotonic() - t0) * 1000)
+
+    with db.connect() as conn:
+        row = conn.execute("SELECT COUNT(*) FROM papers").fetchone()
+        after = row[0] if row else 0
+
+    return {
+        "date": date.today().isoformat(),
+        "new": max(0, after - before),
+        "total_papers": after,
+        "duration_ms": duration_ms,
+    }
 
 
 class ArxivUnavailable(Exception):

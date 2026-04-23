@@ -476,3 +476,68 @@ async def test_digest_days_rejects_invalid(atlas_data_dir):
         neg = await c.get("/api/digest?days=-1")
     assert bad.status_code == 400
     assert neg.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_digest_refresh_endpoint_returns_stats(atlas_data_dir, monkeypatch):
+    db.init()
+
+    async def _fake_build(**_kw):
+        # Simulate inserting one new paper.
+        papers.upsert([
+            Paper(
+                arxiv_id="2604.00001",
+                title="t",
+                authors="a",
+                abstract="x",
+                categories="cs.PL",
+                published="2026-04-22T08:00:00Z",
+            )
+        ])
+        return []
+
+    monkeypatch.setattr("app.main.digest.build_today", _fake_build)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        r = await c.post("/api/digest/refresh")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["new"] == 1
+    assert body["total_papers"] >= 1
+    assert body["duration_ms"] >= 0
+    assert "date" in body
+
+
+@pytest.mark.asyncio
+async def test_digest_refresh_returns_zero_new_when_idempotent(atlas_data_dir, monkeypatch):
+    db.init()
+    papers.upsert([
+        Paper("x1", "t", "a", "x", "cs.PL", "2026-04-22T08:00:00Z"),
+    ])
+
+    async def _fake_build(**_kw):
+        return []
+
+    monkeypatch.setattr("app.main.digest.build_today", _fake_build)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        r = await c.post("/api/digest/refresh")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["new"] == 0
+    assert body["total_papers"] == 1
+
+
+@pytest.mark.asyncio
+async def test_digest_refresh_returns_502_on_fetch_failure(atlas_data_dir, monkeypatch):
+    db.init()
+
+    async def _boom(**_kw):
+        raise RuntimeError("arxiv down")
+
+    monkeypatch.setattr("app.main.digest.build_today", _boom)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        r = await c.post("/api/digest/refresh")
+    assert r.status_code == 502
+    assert "arxiv fetch failed" in r.json()["detail"]
