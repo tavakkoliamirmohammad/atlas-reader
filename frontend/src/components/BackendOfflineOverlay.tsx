@@ -86,12 +86,12 @@ export function BackendOfflineOverlay() {
           className="mb-4 select-all rounded-lg border border-white/5 bg-black/50 px-3 py-2 font-mono text-[12px] text-emerald-300"
           aria-label="Command to start Atlas"
         >
-          atlas start
+          atlas up
         </pre>
         <p className="mb-4 text-[11px] leading-relaxed text-zinc-500">
           Expecting the backend at{" "}
           <code className="rounded bg-white/5 px-1 py-px font-mono text-[10.5px]">
-            http://localhost:8765
+            {window.location.origin}
           </code>
           . This banner hides automatically once it's reachable (checking
           every {Math.round(POLL_INTERVAL_MS / 1000)}s).
