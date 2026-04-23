@@ -96,7 +96,7 @@ export function AppearanceMenu() {
         >
           {/* Theme mode — segmented Light / Dark */}
           <div>
-            <div className="text-[10px] uppercase tracking-wider text-slate-500 mb-1.5">Mode</div>
+            <div className="text-[10px] uppercase tracking-wider text-slate-400 mb-1.5">Mode</div>
             <div
               role="radiogroup"
               aria-label="App theme mode"
@@ -130,7 +130,7 @@ export function AppearanceMenu() {
 
           {/* Palette swatches */}
           <div>
-            <div className="text-[10px] uppercase tracking-wider text-slate-500 mb-1.5">Accent</div>
+            <div className="text-[10px] uppercase tracking-wider text-slate-400 mb-1.5">Accent</div>
             <div className="flex flex-wrap gap-1.5">
               {PALETTES.map((p) => (
                 <button

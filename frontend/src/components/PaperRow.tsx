@@ -104,7 +104,7 @@ export function PaperRow({ paper, isActiveRow, onFocusRequest, enterIndex }: Pro
       <ReadStateDot state={paper.read_state} active={active} />
       <div className="min-w-0 flex-1">
         <div className="text-[13px] leading-snug text-slate-100 font-medium line-clamp-2">{paper.title}</div>
-        <div className="text-[11px] text-slate-500 mt-0.5">
+        <div className="text-[11px] text-slate-400 mt-0.5">
           {paper.authors.split(",")[0]}{paper.authors.includes(",") ? " et al." : ""} {"\u00b7"} {paper.categories.split(",")[0]}
         </div>
       </div>

@@ -129,7 +129,7 @@ export function HighlightsPanel() {
             Highlights
           </span>
           {items.length > 0 && (
-            <span className="text-[10px] text-slate-500 font-mono">{items.length}</span>
+            <span className="text-[10px] text-slate-400 font-mono">{items.length}</span>
           )}
         </span>
         <span
@@ -194,7 +194,7 @@ export function HighlightsPanel() {
                 rows={3}
                 className="w-full bg-transparent border-0 outline-none text-[12px] text-slate-200 placeholder:text-slate-500 resize-none"
               />
-              <div className="text-[10px] text-slate-500 -mt-1">
+              <div className="text-[10px] text-slate-400 -mt-1">
                 Tip: select text in the PDF, press <kbd className="px-1 py-px border border-white/10 rounded font-mono text-[9px]">⌘C</kbd>, then click <kbd className="px-1 py-px border border-white/10 rounded font-mono text-[9px]">+</kbd> — your clipboard auto-fills here.
               </div>
               <div className="flex items-center justify-between gap-2">
@@ -243,7 +243,7 @@ export function HighlightsPanel() {
           )}
 
           {items.length === 0 && !adding && (
-            <div className="text-[11px] text-slate-500 px-1 py-2 leading-relaxed">
+            <div className="text-[11px] text-slate-400 px-1 py-2 leading-relaxed">
               Click + to add a highlight.
             </div>
           )}

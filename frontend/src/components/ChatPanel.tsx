@@ -102,7 +102,7 @@ function GenericModelPicker<T extends string>({
                     {meta[m].label}
                   </span>
                 </span>
-                <span className="text-[10px] text-slate-500">{meta[m].tag}</span>
+                <span className="text-[10px] text-slate-400">{meta[m].tag}</span>
               </button>
             );
           })}
@@ -200,7 +200,7 @@ export function ChatPanel() {
 
   if (!arxivId) {
     return (
-      <div className="flex items-center justify-center h-full text-slate-500 text-sm px-6 text-center">
+      <div className="flex items-center justify-center h-full text-slate-400 text-sm px-6 text-center">
         Open a paper to start chatting.
       </div>
     );
@@ -292,7 +292,7 @@ export function ChatPanel() {
       <Glossary arxivId={arxivId} />
       <div className="px-3 py-2.5">
         <div className="flex items-center justify-between mb-1.5">
-          <div className="text-[10px] uppercase tracking-wider text-slate-500">
+          <div className="text-[10px] uppercase tracking-wider text-slate-400">
             Quick actions
           </div>
           {messages.length > 0 && (
@@ -302,7 +302,7 @@ export function ChatPanel() {
               disabled={streaming}
               aria-label="Clear chat history for this paper"
               title="Clear chat history"
-              className="inline-flex items-center gap-1 text-[10px] text-slate-500 hover:text-rose-300 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors"
+              className="inline-flex items-center gap-1 text-[10px] text-slate-400 hover:text-rose-300 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors"
             >
               <Trash2 size={11} /> Clear
             </button>
@@ -333,7 +333,7 @@ export function ChatPanel() {
         }}
       >
         {messages.length === 0 && !streaming && (
-          <div className="text-xs text-slate-500 text-center mt-8">
+          <div className="text-xs text-slate-400 text-center mt-8">
             Tip:{" "}
             <kbd className="px-1 py-px border border-white/10 rounded font-mono text-[10px]">⌘↵</kbd>{" "}
             send ·{" "}
@@ -393,7 +393,7 @@ export function ChatPanel() {
                 type="button"
                 onClick={clearPinnedQuote}
                 aria-label="Remove pinned quote"
-                className="text-slate-500 hover:text-slate-200 cursor-pointer"
+                className="text-slate-400 hover:text-slate-200 cursor-pointer"
               >
                 ✕
               </button>
@@ -429,7 +429,7 @@ export function ChatPanel() {
               />
             )}
             <div className="flex items-center gap-2">
-              <span className="text-[10px] text-slate-500 hidden sm:inline">
+              <span className="text-[10px] text-slate-400 hidden sm:inline">
                 <kbd className="px-1 py-px border border-white/10 rounded font-mono text-[9px]">⌘</kbd>
                 <kbd className="ml-0.5 px-1 py-px border border-white/10 rounded font-mono text-[9px]">↵</kbd>
               </span>

@@ -54,7 +54,7 @@ export function ReaderOnlyCta() {
           aria-label={copied ? "Copied claude login" : "Copy claude login"}
           className="mt-2 inline-flex items-center gap-2 px-3 py-1.5 rounded-[10px] bg-white/[0.04] border border-white/10 hover:border-[color:var(--ac1-mid)] hover:bg-white/[0.06] transition-colors cursor-pointer"
         >
-          <span className="text-[11px] text-slate-500">run</span>
+          <span className="text-[11px] text-slate-400">run</span>
           <span className="font-mono text-[12px] text-slate-200">{COMMAND}</span>
           {copied ? (
             <span className="inline-flex items-center gap-1 text-[10px] text-[color:var(--ac1)]">

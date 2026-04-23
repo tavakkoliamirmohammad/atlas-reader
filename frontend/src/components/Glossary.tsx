@@ -240,7 +240,7 @@ function TermChip({
               </div>
             )}
             {pinned && (
-              <div className="mt-2 pt-1.5 border-t border-white/5 text-[9.5px] uppercase tracking-wider text-slate-500 flex items-center justify-between">
+              <div className="mt-2 pt-1.5 border-t border-white/5 text-[9.5px] uppercase tracking-wider text-slate-400 flex items-center justify-between">
                 <span>Pinned</span>
                 <kbd className="rounded bg-white/5 px-1 py-px font-mono text-[9px] normal-case">
                   Esc
@@ -333,7 +333,7 @@ export function Glossary({ arxivId }: Props) {
             Glossary
           </span>
           {count > 0 && (
-            <span className="text-[10px] text-slate-500 font-mono">{count}</span>
+            <span className="text-[10px] text-slate-400 font-mono">{count}</span>
           )}
         </span>
         {showBuildButton && (
@@ -386,11 +386,11 @@ export function Glossary({ arxivId }: Props) {
       {open && (
         <div className="px-3 pb-3">
           {terms === null ? (
-            <div className="text-[11px] text-slate-500 px-1 py-1 leading-relaxed">
+            <div className="text-[11px] text-slate-400 px-1 py-1 leading-relaxed">
               Loading…
             </div>
           ) : count === 0 ? (
-            <div className="text-[11px] text-slate-500 px-1 py-1 leading-relaxed">
+            <div className="text-[11px] text-slate-400 px-1 py-1 leading-relaxed">
               No terms yet — click Build glossary to extract.
             </div>
           ) : (

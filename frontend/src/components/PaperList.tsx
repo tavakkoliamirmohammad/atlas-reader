@@ -331,7 +331,7 @@ export function PaperList() {
             type="button"
             aria-label="Clear filter"
             onClick={() => setFilter("")}
-            className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-200 text-[14px] cursor-pointer"
+            className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 text-[14px] cursor-pointer"
           >
             ×
           </button>
@@ -457,7 +457,7 @@ export function PaperList() {
               style={{ borderTopColor: "var(--ac1)" }}
               aria-hidden
             />
-            <div className="text-[11px] uppercase tracking-wider text-slate-500">
+            <div className="text-[11px] uppercase tracking-wider text-slate-400">
               Loading {digestRange === "all" ? "archive" : `${digestRange}-day range`}
             </div>
           </div>
@@ -467,7 +467,7 @@ export function PaperList() {
             <div className="text-[13px] text-slate-300 font-medium">
               No papers in this range
             </div>
-            <div className="text-[11px] text-slate-500 leading-relaxed">
+            <div className="text-[11px] text-slate-400 leading-relaxed">
               {digestRange === "all"
                 ? "The archive is empty. Run a daily build from the backend."
                 : `No arXiv papers published in the last ${digestRange} days. Try a wider range.`}
@@ -479,7 +479,7 @@ export function PaperList() {
             <div className="text-[13px] text-slate-300 font-medium">
               No matches for "{filter}"
             </div>
-            <div className="text-[11px] text-slate-500">
+            <div className="text-[11px] text-slate-400">
               {papers.length} paper{papers.length === 1 ? "" : "s"} in this range didn't match.
             </div>
           </div>
@@ -494,13 +494,13 @@ export function PaperList() {
                 aria-expanded={!collapsed}
                 aria-controls={`day-${g.isoDate}`}
                 className={[
-                  "w-full px-3 pt-2.5 pb-1 text-[11px] uppercase tracking-wider text-slate-500 flex items-center gap-1.5 cursor-pointer hover:text-slate-300 transition-colors focus-visible:outline-none focus-visible:text-slate-200",
+                  "w-full px-3 pt-2.5 pb-1 text-[11px] uppercase tracking-wider text-slate-400 flex items-center gap-1.5 cursor-pointer hover:text-slate-300 transition-colors focus-visible:outline-none focus-visible:text-slate-200",
                   flashingDay === g.isoDate ? "day-flash" : "",
                 ].join(" ")}
               >
                 {collapsed
-                  ? <ChevronRight size={12} className="text-slate-500" aria-hidden />
-                  : <ChevronDown size={12} className="text-slate-500" aria-hidden />}
+                  ? <ChevronRight size={12} className="text-slate-400" aria-hidden />
+                  : <ChevronDown size={12} className="text-slate-400" aria-hidden />}
                 <span>{g.dateLabel} ({g.count})</span>
               </button>
               {!collapsed && (

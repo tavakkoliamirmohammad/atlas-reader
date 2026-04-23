@@ -176,7 +176,7 @@ export function MermaidDiagram({ code }: Props) {
         ) : svg ? (
           <SvgHost svg={svg} className="flex items-center justify-center p-3 overflow-x-auto" />
         ) : (
-          <div className="p-3 text-[11px] text-slate-500">Rendering diagram…</div>
+          <div className="p-3 text-[11px] text-slate-400">Rendering diagram…</div>
         )}
       </figure>
 

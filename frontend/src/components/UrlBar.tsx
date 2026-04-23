@@ -142,7 +142,7 @@ export function UrlBar({ onSubmit }: Props) {
           onClick={() => fileInputRef.current?.click()}
           disabled={busy}
           aria-label="Upload a local PDF"
-          className="inline-flex items-center gap-1 text-[10px] text-slate-500 hover:text-slate-200 cursor-pointer disabled:opacity-50"
+          className="inline-flex items-center gap-1 text-[10px] text-slate-400 hover:text-slate-200 cursor-pointer disabled:opacity-50"
         >
           <Upload size={10} />
           Upload PDF
