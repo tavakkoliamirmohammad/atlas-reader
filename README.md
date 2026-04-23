@@ -62,15 +62,6 @@ Two processes, always:
 
 The runner cannot live in a container — `codex` / `claude` read your macOS Keychain and `~/.codex/` credentials. Put the backend anywhere; the runner stays on your machine. See `CLAUDE.md` for the fuller walk-through.
 
-## Hosted UI (invite-only, \$0)
-
-Deploy once, every invited user runs their own backend. The page talks to each user's `localhost:8765` — no shared AI.
-
-1. Push to GitHub (private is fine).
-2. **Cloudflare Pages** → connect repo. Build command `cd frontend && pnpm install && pnpm build`; output `frontend/dist`.
-3. **Cloudflare Access** → add an Access app over the Pages URL; policy **Emails → include** your invite list. Free up to 50 users.
-4. Users export `ATLAS_CORS_ORIGINS="https://<your-pages-url>"` before running `atlas start`.
-
 ## Data
 
 Everything under `~/.atlas/`:
