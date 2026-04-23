@@ -45,14 +45,33 @@ async def _run_text(
     return "".join(parts)
 
 
+_DEF_TAG_RE = None  # lazy; set in _extract_def_tag
+
+
+def _extract_def_tag(raw: str) -> Optional[str]:
+    """If the model wrapped its answer in <def>...</def>, return the inside.
+
+    This is the primary parsing path — the prompt asks the model to use the
+    tag. Preamble and postamble outside the tag are discarded. Returns None
+    if no tag is found (caller falls back to `_clean_definition`).
+    """
+    global _DEF_TAG_RE
+    import re
+    if _DEF_TAG_RE is None:
+        _DEF_TAG_RE = re.compile(r"<def>(.*?)</def>", re.DOTALL | re.IGNORECASE)
+    m = _DEF_TAG_RE.search(raw)
+    if not m:
+        return None
+    inner = m.group(1).strip()
+    return inner or None
+
+
 def _clean_definition(raw: str, term: str) -> str:
     """Strip meta-preamble from a definition.
 
-    Models sometimes prepend lines like "Using the Superpowers workflow to
-    keep the response constrained..." or "Here's the definition:" before the
-    actual sentence. We split on sentence boundaries and return from the
-    first sentence that contains the term (case-insensitive substring).
-    Falls back to stripping the last sentence if the term isn't found.
+    Fallback path used when the model didn't wrap its answer in <def>...</def>.
+    Splits on sentence boundaries, drops sentences that look like preamble,
+    then returns from the first sentence containing the term.
     """
     import re
 
@@ -68,9 +87,33 @@ def _clean_definition(raw: str, term: str) -> str:
         text = text.strip()
 
     # Split into sentences on ". " keeping the period. Naive but good enough.
-    sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", text) if s.strip()]
-    if not sentences:
+    all_sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", text) if s.strip()]
+    if not all_sentences:
         return text
+    sentences = list(all_sentences)  # working copy we can pop from
+
+    # Preamble sentences start with giveaway phrases. Drop from the head until
+    # we hit a non-preamble sentence. This handles the "I'm checking what
+    # `XCD` means..." case where the preamble itself mentions the term.
+    _PREAMBLE_STARTS = (
+        "i'm ", "i am ", "i'll ", "i will ", "i've ", "i have ",
+        "let me ", "let's ", "i need ",
+        "before ", "to define", "to answer", "to explain",
+        "looking at ", "considering ", "sure,", "ok,", "okay,",
+        "here is ", "here's ", "the answer ",
+        "using the ", "using superpowers", "based on",
+        "note that", "checking ", "i'm checking",
+    )
+    def _is_preamble(s: str) -> bool:
+        stripped = re.sub(r"^[^a-z]+", "", s.lower())
+        return stripped.startswith(_PREAMBLE_STARTS)
+
+    while sentences and _is_preamble(sentences[0]):
+        sentences.pop(0)
+    if not sentences:
+        # Every sentence looked like preamble — fall back to the last
+        # sentence of the original output (usually closest to the answer).
+        return all_sentences[-1]
 
     # Normalize term for lookup — lowercase, collapse whitespace, strip punct.
     term_norm = re.sub(r"\s+", " ", term.strip().lower())
@@ -85,8 +128,8 @@ def _clean_definition(raw: str, term: str) -> str:
         if _contains_term(s):
             return " ".join(sentences[i:]).strip()
 
-    # Term never appears — last sentence is usually the least-meta one.
-    return sentences[-1]
+    # Term never appears — return the first remaining non-preamble sentence.
+    return sentences[0]
 
 
 def _parse_terms(raw: str) -> list[str]:
@@ -183,13 +226,18 @@ async def define(
     prompt = (
         f"Define '{term}' for a compilers PhD student in ONE sentence (max "
         f"25 words).\n\n"
-        f"Respond ONLY with the sentence. Start with the term itself or a "
-        f"noun phrase. No preamble, no meta-commentary, no 'I'll now define', "
-        f"no 'Here is', no 'Using the', no workflow narration, no tool "
-        f"narration, no closing remarks. Just the sentence."
+        f"Wrap your answer in XML-style tags:\n"
+        f"    <def>YOUR SENTENCE HERE</def>\n\n"
+        f"Anything outside the tags is ignored, so you may think out loud "
+        f"before writing the tag if you need to — but the definition itself "
+        f"must be inside the tags, start with '{term}' or a noun phrase, and "
+        f"contain no meta-commentary."
     )
     raw = await _run_text("Define the term.", prompt, backend=backend)
-    definition = _clean_definition(raw, term)
+
+    # Primary parse: extract the <def>...</def> payload. Fallback cleaner
+    # handles the case where the model skipped the tag.
+    definition = _extract_def_tag(raw) or _clean_definition(raw, term)
     if not definition:
         definition = f"(no definition available for '{term}')"
 

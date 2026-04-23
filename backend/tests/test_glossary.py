@@ -195,3 +195,31 @@ def test_clean_definition_falls_back_to_last_sentence_when_term_missing():
     raw = "I'll now explain this. Here is the answer you requested."
     out = glossary._clean_definition(raw, "SomeUnrelatedTerm")
     assert out == "Here is the answer you requested."
+
+
+# --- <def> tag extraction ------------------------------------------------
+
+def test_extract_def_tag_happy_path():
+    raw = "I'll respond in tags. <def>XCD is a cross-compilation driver.</def> Done."
+    assert glossary._extract_def_tag(raw) == "XCD is a cross-compilation driver."
+
+
+def test_extract_def_tag_multiline():
+    raw = "Some preamble.\n<def>A is\nsomething.</def>\nmore."
+    assert glossary._extract_def_tag(raw) == "A is\nsomething."
+
+
+def test_extract_def_tag_absent_returns_none():
+    assert glossary._extract_def_tag("just a plain answer") is None
+
+
+def test_clean_definition_drops_preamble_mentioning_the_term():
+    """Regression: preamble mentioning the term used to be returned."""
+    raw = (
+        "I'm checking what `XCD` means in compilers before defining it, "
+        "since the acronym is niche. XCD is an overloaded acronym, but in "
+        "compiler workflows it often means a cross-compilation driver."
+    )
+    out = glossary._clean_definition(raw, "XCD")
+    assert out.startswith("XCD is an overloaded acronym")
+    assert "I'm checking" not in out
