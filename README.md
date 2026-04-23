@@ -9,18 +9,30 @@ Atlas fetches today's arXiv papers in the categories you care about, gives each 
 
 ![Atlas screenshot](docs/screenshot.png)
 
-## Quick start
+## Quick start (Docker — recommended)
+
+Docker builds the whole app. You don't need Node, pnpm, or even Python on the host — just Docker and your AI CLI.
 
 ```bash
 git clone https://github.com/tavakkoliamirmohammad/atlas-reader atlas && cd atlas
 python3.12 -m venv .venv && source .venv/bin/activate
 pip install -e .                           # installs the `atlas` CLI
-cd frontend && pnpm install && cd ..
 codex login                                # or run `claude` once
 atlas up-docker                            # http://localhost:8765
 ```
 
 `atlas up-docker` starts the host AI runner, builds + starts the backend/frontend container, and opens the browser. Stop with `atlas down-docker`.
+
+> Docker's multi-stage build does `pnpm install && pnpm build` inside the `node:20-alpine` build stage — the compiled SPA is copied into the Python runtime image as static files. No Node toolchain needed on your machine.
+
+### Native mode (no Docker)
+
+If you want to run everything directly on the host (no container, ~2× less memory), you do need Node + pnpm because the backend serves `frontend/dist/` which must be built locally:
+
+```bash
+cd frontend && pnpm install && pnpm build && cd ..
+atlas up                                   # http://localhost:8765
+```
 
 ## Run modes
 
