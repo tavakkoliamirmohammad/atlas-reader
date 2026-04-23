@@ -94,3 +94,16 @@ def test_is_port_free_false_when_bound(atlas_data_dir):
         assert port_config.is_port_free(port) is False
     finally:
         s.close()
+
+
+def test_persist_ports_writes_with_0o600_mode(atlas_data_dir):
+    """runner.env must never exist at a mode more permissive than 0o600.
+
+    Regression: previously write_text then chmod created a brief window where
+    the file — which may already contain ATLAS_AI_SECRET — was world-readable.
+    """
+    import os
+
+    port_config.persist_ports(backend=9000, runner=9001)
+    mode = os.stat(atlas_data_dir / "runner.env").st_mode & 0o777
+    assert mode == 0o600, f"runner.env mode {oct(mode)} leaks the secret"

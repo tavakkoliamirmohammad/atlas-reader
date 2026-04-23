@@ -69,6 +69,21 @@ def runner_port() -> int:
     return _resolve("ATLAS_RUNNER_PORT", DEFAULT_RUNNER_PORT)
 
 
+def _atomic_write_0o600(path: Path, content: str) -> None:
+    """Write ``content`` to ``path`` atomically at mode 0o600 with no
+    intermediate window at a laxer mode.
+
+    ``write_text(...)`` then ``chmod(...)`` leaks the file at the umask-default
+    mode (typically 0o644) between the two calls — a brief window but one that
+    matters for a file containing ``ATLAS_AI_SECRET``. Here we open with
+    ``O_CREAT | O_WRONLY | O_TRUNC`` at mode 0o600 so the file never exists at
+    a laxer mode.
+    """
+    fd = os.open(path, os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        f.write(content)
+
+
 def persist_ports(*, backend: int | None, runner: int | None) -> None:
     """Write ATLAS_PORT / ATLAS_RUNNER_PORT to runner.env, preserving other keys.
 
@@ -83,8 +98,7 @@ def persist_ports(*, backend: int | None, runner: int | None) -> None:
         existing["ATLAS_RUNNER_PORT"] = str(runner)
     path.parent.mkdir(parents=True, exist_ok=True)
     body = "".join(f"{k}={v}\n" for k, v in existing.items())
-    path.write_text(body)
-    os.chmod(path, 0o600)
+    _atomic_write_0o600(path, body)
 
 
 def is_port_free(port: int, host: str = "127.0.0.1") -> bool:

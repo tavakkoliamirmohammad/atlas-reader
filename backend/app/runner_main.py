@@ -251,7 +251,7 @@ def main() -> None:
     )
     if secret_store.load() is None:
         raise SystemExit(
-            "atlas-ai-runner: no secret found. Run `atlas start` first, or "
+            "atlas-ai-runner: no secret found. Run `atlas up` first, or "
             "set ATLAS_AI_SECRET in the environment."
         )
     host = os.environ.get("ATLAS_RUNNER_HOST", "127.0.0.1")

@@ -1,9 +1,16 @@
 """Shared secret for the Atlas AI runner.
 
 The secret lives at `~/.atlas/runner.secret` (mode 0600) and is injected into
-both the runner and the backend at startup. It's also surfaced as
-`~/.atlas/runner.env` (`ATLAS_AI_SECRET=<value>`) so docker-compose can pick it
-up via `env_file:`.
+both the runner and the backend at startup. It's also written to
+`~/.atlas/runner.env` (`ATLAS_AI_SECRET=<value>`) which docker-compose reads
+via `env_file:`.
+
+That same ``runner.env`` file is shared with ``app.port_config``: when the
+user passes ``atlas up --port`` / ``--runner-port``, those port overrides
+land in ``runner.env`` as ``ATLAS_PORT`` / ``ATLAS_RUNNER_PORT`` keys. Writes
+here MUST preserve every key owned by another module — earlier versions of
+``ensure()`` clobbered the file with just ``ATLAS_AI_SECRET=...``, silently
+destroying the persisted port values.
 
 Anything running as the user's UID can read this file; that's the inherent
 ceiling of localhost-daemon security on macOS. The token still buys us
@@ -16,7 +23,7 @@ import os
 import secrets
 from pathlib import Path
 
-from app import db
+from app import db, port_config
 
 
 def _secret_path() -> Path:
@@ -38,14 +45,23 @@ def load() -> str | None:
 
 
 def ensure() -> str:
-    """Return the secret, generating + persisting a fresh one if missing."""
+    """Return the secret, generating + persisting a fresh one if missing.
+
+    Preserves any existing keys in ``runner.env`` (e.g. ``ATLAS_PORT``,
+    ``ATLAS_RUNNER_PORT`` written by ``port_config.persist_ports``); only
+    the ``ATLAS_AI_SECRET`` key is inserted / updated.
+    """
     if existing := load():
         return existing
     token = secrets.token_urlsafe(32)
-    secret = _secret_path()
-    env = _env_path()
-    secret.write_text(token)
-    os.chmod(secret, 0o600)
-    env.write_text(f"ATLAS_AI_SECRET={token}\n")
-    os.chmod(env, 0o600)
+
+    # runner.secret: atomic-permissioned write.
+    port_config._atomic_write_0o600(_secret_path(), token)
+
+    # runner.env: preserve other keys, upsert ATLAS_AI_SECRET, atomic write.
+    pairs = port_config._read_file_env()
+    pairs["ATLAS_AI_SECRET"] = token
+    body = "".join(f"{k}={v}\n" for k, v in pairs.items())
+    port_config._atomic_write_0o600(_env_path(), body)
+
     return token

@@ -248,3 +248,40 @@ def test_over_rate_limit_returns_429(client, monkeypatch):
 
 async def _fake_run_job(body, timeout_s):   # noqa: ARG001 - signature-matched fake
     yield {"type": "text", "text": "hello"}
+
+
+def test_ensure_preserves_existing_runner_env_keys(atlas_data_dir, monkeypatch):
+    """secret_store.ensure() must not clobber port keys written by port_config.persist_ports.
+
+    Regression: previously ensure() did env.write_text('ATLAS_AI_SECRET=...') which
+    destroyed ATLAS_PORT / ATLAS_RUNNER_PORT already in the file.
+    """
+    from app import secret_store
+
+    env_file = atlas_data_dir / "runner.env"
+    env_file.write_text("ATLAS_PORT=9000\nATLAS_RUNNER_PORT=9001\n")
+    monkeypatch.delenv("ATLAS_AI_SECRET", raising=False)
+
+    token = secret_store.ensure()
+    content = env_file.read_text()
+
+    assert "ATLAS_PORT=9000" in content
+    assert "ATLAS_RUNNER_PORT=9001" in content
+    assert f"ATLAS_AI_SECRET={token}" in content
+
+
+def test_ensure_writes_runner_env_with_0o600_mode(atlas_data_dir, monkeypatch):
+    """runner.env must never exist at a mode more permissive than 0o600.
+
+    Regression: previously write_text then chmod created a brief window where
+    the file holding ATLAS_AI_SECRET was world-readable.
+    """
+    import os
+    from app import secret_store
+
+    env_file = atlas_data_dir / "runner.env"
+    monkeypatch.delenv("ATLAS_AI_SECRET", raising=False)
+    secret_store.ensure()
+
+    mode = os.stat(env_file).st_mode & 0o777
+    assert mode == 0o600, f"runner.env mode {oct(mode)} leaks the secret"
