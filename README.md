@@ -3,6 +3,7 @@
 > A local-first daily reviewer for arXiv papers in compilers, PL, and MLIR.
 > Uses *your* `codex` or `claude` CLI subscription — **no API keys, \$0 recurring cost**.
 
+[![CI](https://github.com/tavakkoliamirmohammad/atlas-reader/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/tavakkoliamirmohammad/atlas-reader/actions/workflows/ci.yml)
 ![License](https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-orange)
 
 Atlas fetches today's arXiv papers in the categories you care about, gives each a deep 10-section summary on demand, lets you highlight + ask follow-ups, and remembers everything locally. All AI work is done by spawning your own `codex` / `claude` CLI, so nothing leaves your machine and nothing is billed to an API account.
