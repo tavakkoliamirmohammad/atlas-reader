@@ -16,10 +16,13 @@ Install one of the AI CLIs locally (`codex` or `claude`) and sign in once — At
 ## Running
 
 ```bash
-atlas up-docker           # one-command Docker mode (recommended)
-atlas up                  # native: builds frontend + starts backend
-pnpm --dir frontend dev   # dev server on :5173 with hot reload
+atlas up                       # Docker: backend container + host runner
+pnpm --dir frontend dev        # contributor dev: Vite on :5173, proxies /api → backend container
 ```
+
+The Vite dev server honors `ATLAS_PORT`, so if you run `atlas up --port 9000`, start the dev server with `ATLAS_PORT=9000 pnpm --dir frontend dev`.
+
+For backend-only hot reload (rare — usually you'd just restart the container), run `uvicorn app.main:app --reload --port 8765 --app-dir backend` against a stopped container.
 
 ## Tests
 
