@@ -1,5 +1,11 @@
+from datetime import datetime, timedelta, timezone
+
 from app import db, papers
 from app.arxiv import Paper
+
+
+def _iso_days_ago(days: int) -> str:
+    return (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 SAMPLE = Paper(
@@ -8,7 +14,7 @@ SAMPLE = Paper(
     authors="A, B",
     abstract="An abstract.",
     categories="cs.PL",
-    published="2026-04-18T08:00:00Z",
+    published=_iso_days_ago(1),
 )
 
 
@@ -31,8 +37,8 @@ def test_upsert_replaces_existing(atlas_data_dir):
 
 def test_list_recent_returns_in_descending_published_order(atlas_data_dir):
     db.init()
-    p1 = Paper(**{**SAMPLE.__dict__, "arxiv_id": "1", "published": "2026-04-17T08:00:00Z"})
-    p2 = Paper(**{**SAMPLE.__dict__, "arxiv_id": "2", "published": "2026-04-18T08:00:00Z"})
+    p1 = Paper(**{**SAMPLE.__dict__, "arxiv_id": "1", "published": _iso_days_ago(2)})
+    p2 = Paper(**{**SAMPLE.__dict__, "arxiv_id": "2", "published": _iso_days_ago(1)})
     papers.upsert([p1, p2])
     rows = papers.list_recent(days=7)
     assert [r["arxiv_id"] for r in rows] == ["2", "1"]
