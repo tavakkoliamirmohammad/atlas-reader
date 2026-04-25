@@ -36,7 +36,9 @@ from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 
-from app import ai_argv, ai_local, db, secret_store, subprocess_spawn
+import uvicorn
+
+from app import ai_argv, ai_local, db, port_config, secret_store, subprocess_spawn
 
 
 log = logging.getLogger("atlas.runner")
@@ -243,8 +245,6 @@ async def _run_job(body: RunRequest, timeout_s: int) -> AsyncIterator[dict]:
 
 def main() -> None:
     """Entry point for the `atlas-ai-runner` console script."""
-    import uvicorn
-
     logging.basicConfig(
         level=os.environ.get("ATLAS_RUNNER_LOG_LEVEL", "INFO"),
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
@@ -255,7 +255,7 @@ def main() -> None:
             "set ATLAS_AI_SECRET in the environment."
         )
     host = os.environ.get("ATLAS_RUNNER_HOST", "127.0.0.1")
-    port = int(os.environ.get("ATLAS_RUNNER_PORT", "8766"))
+    port = port_config.runner_port()
     uvicorn.run(app, host=host, port=port, log_level="info")
 
 

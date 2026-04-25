@@ -160,3 +160,29 @@ def test_uninstall_launchd_calls_launchd_uninstall(capsys, atlas_data_dir):
     with patch("app.cli.launchd.uninstall", return_value="removed: /tmp/foo.plist"):
         cli.main(["uninstall-launchd"])
     assert "removed" in capsys.readouterr().out
+
+
+def test_up_flag_overrides_existing_env_var(atlas_data_dir, monkeypatch):
+    """`--port N` must win over a stale `ATLAS_PORT` exported in the shell.
+
+    Regression: the explicit flag should always beat ambient env, otherwise the user
+    can be surprised when `--port 9000` is silently ignored because they had
+    ATLAS_PORT=8765 exported.
+    """
+    monkeypatch.setenv("ATLAS_PORT", "8765")
+    from unittest.mock import MagicMock, patch
+
+    with patch("app.cli._have_docker", return_value=True), \
+         patch("app.cli._start_runner"), \
+         patch("app.cli.port_config.is_port_free", return_value=True), \
+         patch("app.cli.subprocess.run") as mock_run, \
+         patch("app.cli._wait_for_health", return_value=False):
+        mock_run.return_value = MagicMock(returncode=0)
+        cli.main(["up", "--port", "9000"])
+
+    # Look at the env passed to the docker compose subprocess call (the one with up/--build/-d).
+    compose_call = next(
+        c for c in mock_run.call_args_list
+        if "up" in c.args[0] and "--build" in c.args[0]
+    )
+    assert compose_call.kwargs["env"]["ATLAS_PORT"] == "9000"

@@ -107,3 +107,39 @@ def test_persist_ports_writes_with_0o600_mode(atlas_data_dir):
     port_config.persist_ports(backend=9000, runner=9001)
     mode = os.stat(atlas_data_dir / "runner.env").st_mode & 0o777
     assert mode == 0o600, f"runner.env mode {oct(mode)} leaks the secret"
+
+
+def test_runner_main_resolves_port_from_runner_env_file(monkeypatch, atlas_data_dir):
+    """`runner_main.main` must pick the persisted port from runner.env even when no env var is set.
+
+    Regression: previously the runner read os.environ['ATLAS_RUNNER_PORT'] directly and
+    ignored runner.env, so `atlas up --runner-port N` silently bound the runner to 8766
+    while telling the container to talk to N.
+    """
+    import os
+
+    (atlas_data_dir / "runner.env").write_text("ATLAS_RUNNER_PORT=9001\n")
+    monkeypatch.delenv("ATLAS_RUNNER_PORT", raising=False)
+
+    # The runner module must consult port_config (and thus runner.env), not raw os.environ.
+    from app import port_config
+    assert port_config.runner_port() == 9001
+
+
+def test_runner_main_uses_port_config_not_os_environ(monkeypatch, atlas_data_dir, capsys):
+    """Smoke test: runner_main reads through port_config and surfaces the right value.
+
+    Patches uvicorn.run so we don't actually bind. Confirms the port passed to uvicorn
+    came from runner.env, not from a missing env var defaulting to 8766.
+    """
+    from unittest.mock import patch
+
+    (atlas_data_dir / "runner.env").write_text("ATLAS_RUNNER_PORT=9001\nATLAS_AI_SECRET=stub\n")
+    monkeypatch.delenv("ATLAS_RUNNER_PORT", raising=False)
+    monkeypatch.delenv("ATLAS_AI_SECRET", raising=False)
+
+    from app import runner_main
+    with patch("app.runner_main.uvicorn.run") as mock_run:
+        runner_main.main()
+    kwargs = mock_run.call_args.kwargs
+    assert kwargs["port"] == 9001

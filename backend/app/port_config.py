@@ -34,7 +34,7 @@ def _env_file() -> Path:
     return db.data_dir() / "runner.env"
 
 
-def _read_file_env() -> dict[str, str]:
+def read_env_file() -> dict[str, str]:
     """Return the key=value pairs in runner.env (empty dict if missing/unreadable)."""
     p = _env_file()
     if not p.exists():
@@ -51,7 +51,7 @@ def _read_file_env() -> dict[str, str]:
 
 def _resolve(key: str, default: int) -> int:
     """Read ``key`` from os.environ, then runner.env, then fall back to ``default``."""
-    for source in (os.environ.get(key), _read_file_env().get(key)):
+    for source in (os.environ.get(key), read_env_file().get(key)):
         if source is None or source == "":
             continue
         try:
@@ -69,7 +69,7 @@ def runner_port() -> int:
     return _resolve("ATLAS_RUNNER_PORT", DEFAULT_RUNNER_PORT)
 
 
-def _atomic_write_0o600(path: Path, content: str) -> None:
+def atomic_write_0o600(path: Path, content: str) -> None:
     """Write ``content`` to ``path`` atomically at mode 0o600 with no
     intermediate window at a laxer mode.
 
@@ -91,14 +91,14 @@ def persist_ports(*, backend: int | None, runner: int | None) -> None:
     clear it.
     """
     path = _env_file()
-    existing = _read_file_env()
+    existing = read_env_file()
     if backend is not None:
         existing["ATLAS_PORT"] = str(backend)
     if runner is not None:
         existing["ATLAS_RUNNER_PORT"] = str(runner)
     path.parent.mkdir(parents=True, exist_ok=True)
     body = "".join(f"{k}={v}\n" for k, v in existing.items())
-    _atomic_write_0o600(path, body)
+    atomic_write_0o600(path, body)
 
 
 def is_port_free(port: int, host: str = "127.0.0.1") -> bool:

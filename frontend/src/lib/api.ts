@@ -5,7 +5,7 @@ import { streamSSE, type SSEHandlers } from "./sse";
 //     vite proxy (dev) or same origin (when the backend serves the SPA).
 //   - Hosted mode (Cloudflare Pages / GitHub Pages): set VITE_API_BASE to the
 //     user's local backend, e.g. "http://localhost:8765". Each user then talks
-//     to their own `atlas start` — no shared backend, no shared AI.
+//     to their own `atlas up` — no shared backend, no shared AI.
 const API_BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? "";
 
 /** Prefix a relative API path with the configured base URL. */

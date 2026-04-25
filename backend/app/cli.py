@@ -135,6 +135,10 @@ def cmd_up(args: argparse.Namespace) -> int:
     # Persist CLI port overrides BEFORE reading them so compose sees the new values.
     if args.port is not None or args.runner_port is not None:
         port_config.persist_ports(backend=args.port, runner=args.runner_port)
+        if args.port is not None:
+            os.environ["ATLAS_PORT"] = str(args.port)
+        if args.runner_port is not None:
+            os.environ["ATLAS_RUNNER_PORT"] = str(args.runner_port)
 
     backend_p = port_config.backend_port()
     runner_p = port_config.runner_port()

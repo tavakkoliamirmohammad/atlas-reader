@@ -35,13 +35,14 @@ def _env_path() -> Path:
 
 
 def load() -> str | None:
-    """Return the secret from env or disk, or None if missing."""
+    """Return the secret from env, runner.secret, or runner.env; None if missing."""
     if env := os.environ.get("ATLAS_AI_SECRET"):
         return env.strip() or None
     p = _secret_path()
     if p.exists():
         return p.read_text().strip() or None
-    return None
+    val = port_config.read_env_file().get("ATLAS_AI_SECRET")
+    return val.strip() or None if val else None
 
 
 def ensure() -> str:
@@ -56,12 +57,12 @@ def ensure() -> str:
     token = secrets.token_urlsafe(32)
 
     # runner.secret: atomic-permissioned write.
-    port_config._atomic_write_0o600(_secret_path(), token)
+    port_config.atomic_write_0o600(_secret_path(), token)
 
     # runner.env: preserve other keys, upsert ATLAS_AI_SECRET, atomic write.
-    pairs = port_config._read_file_env()
+    pairs = port_config.read_env_file()
     pairs["ATLAS_AI_SECRET"] = token
     body = "".join(f"{k}={v}\n" for k, v in pairs.items())
-    port_config._atomic_write_0o600(_env_path(), body)
+    port_config.atomic_write_0o600(_env_path(), body)
 
     return token
