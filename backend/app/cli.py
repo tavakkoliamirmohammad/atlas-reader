@@ -150,7 +150,12 @@ def cmd_up(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 1
-    if not port_config.is_port_free(runner_p):
+    # Skip the runner pre-check when our own runner is already bound to it —
+    # `_start_runner()` is idempotent for that case. Only foreign holders should
+    # block startup.
+    runner_pid = _read_pid(_runner_pid_file())
+    runner_is_ours = runner_pid is not None and _is_alive(runner_pid)
+    if not runner_is_ours and not port_config.is_port_free(runner_p):
         print(
             f"error: runner port {runner_p} is already in use on this host.\n"
             f"       pass `atlas up --runner-port N` (or export ATLAS_RUNNER_PORT=N) to pick another.",

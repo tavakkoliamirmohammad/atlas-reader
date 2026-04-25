@@ -162,6 +162,41 @@ def test_uninstall_launchd_calls_launchd_uninstall(capsys, atlas_data_dir):
     assert "removed" in capsys.readouterr().out
 
 
+def test_up_skips_runner_port_check_when_our_runner_already_alive(atlas_data_dir):
+    """When our own runner PID is alive on the runner port, atlas up must NOT
+    reject as 'port in use' — _start_runner() handles already-alive idempotently.
+    Regression: a leftover runner from a prior session would reject every
+    subsequent `atlas up`.
+    """
+    from unittest.mock import MagicMock, patch
+    # Pretend our runner is alive (PID file present, _is_alive returns True).
+    pid_file = atlas_data_dir / "atlas-runner.pid"
+    pid_file.write_text("12345")
+
+    # is_port_free returns True for backend, would return False for runner —
+    # but we expect the runner check to be SKIPPED, so this False should never matter.
+    with patch("app.cli._have_docker", return_value=True), \
+         patch("app.cli._is_alive", return_value=True), \
+         patch("app.cli._start_runner"), \
+         patch("app.cli.port_config.is_port_free", side_effect=[True, False]) as mock_free, \
+         patch("app.cli.subprocess.run") as mock_run, \
+         patch("app.cli._wait_for_health", return_value=False):
+        mock_run.return_value = MagicMock(returncode=0)
+        rc = cli.main(["up"])
+
+    # cmd_up should have proceeded past the pre-checks (it returns 1 only because
+    # we mock health to fail; that's a separate downstream path).
+    # Critically, is_port_free was called at most once (for the backend) — never
+    # for the runner.
+    assert mock_free.call_count == 1, (
+        f"runner pre-check should be skipped when our runner is alive; "
+        f"got {mock_free.call_count} is_port_free calls"
+    )
+    # And docker compose was actually invoked, proving we passed the pre-checks.
+    assert any("up" in c.args[0] and "--build" in c.args[0]
+               for c in mock_run.call_args_list)
+
+
 def test_up_flag_overrides_existing_env_var(atlas_data_dir, monkeypatch):
     """`--port N` must win over a stale `ATLAS_PORT` exported in the shell.
 
