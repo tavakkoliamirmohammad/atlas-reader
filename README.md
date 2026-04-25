@@ -9,41 +9,51 @@ Atlas fetches today's arXiv papers in the categories you care about, gives each 
 
 ![Atlas screenshot](docs/screenshot.png)
 
-## Quick start (Docker — recommended)
+> **v0.2 breaking change:** `atlas start`, `atlas stop`, `atlas restart`, and native `atlas up` are removed. Docker is now the only supported runtime. Use `atlas up` / `atlas down`. See [`docs/superpowers/specs/2026-04-22-docker-only-and-configurable-ports-design.md`](docs/superpowers/specs/2026-04-22-docker-only-and-configurable-ports-design.md) for the rationale.
 
-Docker builds the whole app. You don't need Node, pnpm, or even Python on the host — just Docker and your AI CLI.
+## Quick start
+
+Docker is the supported runtime. You don't need Node, pnpm, or Python on the host — just Docker and your AI CLI.
 
 ```bash
 git clone https://github.com/tavakkoliamirmohammad/atlas-reader atlas && cd atlas
 python3.12 -m venv .venv && source .venv/bin/activate
 pip install -e .                           # installs the `atlas` CLI
 codex login                                # or run `claude` once
-atlas up-docker                            # http://localhost:8765
-```
-
-`atlas up-docker` starts the host AI runner, builds + starts the backend/frontend container, and opens the browser. Stop with `atlas down-docker`.
-
-> Docker's multi-stage build does `pnpm install && pnpm build` inside the `node:20-alpine` build stage — the compiled SPA is copied into the Python runtime image as static files. No Node toolchain needed on your machine.
-
-### Native mode (no Docker)
-
-If you want to run everything directly on the host (no container, ~2× less memory), you do need Node + pnpm because the backend serves `frontend/dist/` which must be built locally:
-
-```bash
-cd frontend && pnpm install && pnpm build && cd ..
 atlas up                                   # http://localhost:8765
 ```
 
-## Run modes
+`atlas up` starts the host AI runner, builds + starts the backend/frontend container, waits for health, and opens your browser. Stop with `atlas down`.
 
-| Mode | Command | URL |
-| --- | --- | --- |
-| **Docker** (recommended) | `atlas up-docker` | http://localhost:8765 |
-| **Native** | `atlas up` | http://localhost:8765 |
-| **Dev** (hot reload) | `atlas start-runner` + `pnpm --dir frontend dev` + `uvicorn app.main:app --reload --port 8765` | http://localhost:5173 |
-| **Hosted UI + local backend** | `atlas start` | hosted URL (see below) |
+> Docker's multi-stage build does `pnpm install && pnpm build` inside the `node:20-alpine` build stage — the compiled SPA is copied into the Python runtime image as static files. No Node toolchain needed on your machine.
 
-Status: `atlas status` · Logs: `atlas runner-logs`, `docker compose logs -f atlas`.
+## Custom ports
+
+If `8765` (backend) or `8766` (runner) is already taken on your host, pick another:
+
+```bash
+atlas up --port 9000 --runner-port 9001
+# or export ahead of time:
+export ATLAS_PORT=9000
+export ATLAS_RUNNER_PORT=9001
+atlas up
+```
+
+Flags are persisted to `~/.atlas/runner.env` so subsequent `atlas down`, `atlas status`, `atlas logs`, and `atlas open` all pick up the same ports.
+
+## Commands
+
+| Command | What it does |
+| --- | --- |
+| `atlas up [--port N] [--runner-port N]` | Start host runner + backend container; wait for health; open browser. |
+| `atlas down` | Stop the container and the host runner. |
+| `atlas status` | `docker compose ps` + runner status + active ports. |
+| `atlas logs` | Stream backend container logs (`docker compose logs -f atlas`). |
+| `atlas runner-logs` | Tail `~/.atlas/atlas-runner.log`. |
+| `atlas open` | Open `http://localhost:$ATLAS_PORT` in your browser. |
+| `atlas doctor` | Print security posture + active ports. |
+| `atlas start-runner` / `atlas stop-runner` | Manage the host runner in isolation (rare). |
+| `atlas install-launchd` / `atlas uninstall-launchd` | Start Atlas at login (macOS). |
 
 ## Architecture
 
