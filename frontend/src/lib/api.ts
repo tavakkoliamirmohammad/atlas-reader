@@ -71,31 +71,32 @@ export async function refreshDigest(): Promise<DigestRefreshResult> {
   return r.json();
 }
 
+// Claude side stays as three stable aliases — the Anthropic CLI auto-resolves
+// each to the latest concrete model, so this set rarely needs editing.
 export type ModelChoice = "opus" | "sonnet" | "haiku";
 
-// Codex models mirror backend/app/ai_argv.CODEX_MODELS. Keep in sync with what
-// `codex --help` / "Select Model" actually lists in codex-cli.
-export type CodexModel =
-  | "gpt-5.4"
-  | "gpt-5.4-mini"
-  | "gpt-5.3-codex"
-  | "gpt-5.2"
-  | "gpt-5.2-codex"
-  | "gpt-5.1-codex-max"
-  | "gpt-5.1-codex-mini";
+// Codex models are discovered at runtime from the codex CLI's own model cache
+// via /api/models. Anything goes — the picker shows whatever codex itself can
+// reach today, no hardcoded enum to drift.
+export type CodexModel = string;
 
-export const CODEX_MODEL_OPTIONS: CodexModel[] = [
-  "gpt-5.4",
-  "gpt-5.4-mini",
-  "gpt-5.3-codex",
-  "gpt-5.2",
-  "gpt-5.2-codex",
-  "gpt-5.1-codex-max",
-  "gpt-5.1-codex-mini",
-];
+export type CodexModelInfo = {
+  slug: CodexModel;
+  label: string;
+  description: string;
+};
+
+export async function getCodexModels(): Promise<CodexModelInfo[]> {
+  const r = await fetch(u("/api/models?backend=codex"));
+  if (!r.ok) {
+    throw new Error(`getCodexModels ${r.status}: ${await r.text()}`);
+  }
+  const data = (await r.json()) as { models: CodexModelInfo[] };
+  return data.models;
+}
 
 // Single type used by UI state when it needs to reference either backend's
-// model identifier. Each backend has its own picker that narrows to its type.
+// model identifier. Each backend has its own picker.
 export type AnyModel = ModelChoice | CodexModel;
 
 export type ChatMessage = {

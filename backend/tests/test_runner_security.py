@@ -112,15 +112,40 @@ def test_unknown_task_is_422(client):
     assert r.status_code == 422
 
 
-def test_off_allowlist_model_is_400(client):
-    r = client.post("/run", json=_valid_payload(backend="codex", model="gpt-9"), headers=_auth())
-    assert r.status_code == 400
+def test_unknown_model_accepted_at_runner(client, monkeypatch):
+    # The runner no longer gates on a hardcoded model allowlist; the CLI
+    # itself rejects unknown slugs downstream. This keeps Atlas working with
+    # newly-released models without source edits.
+    monkeypatch.setattr(runner_main, "_run_job", _fake_run_job)
+    r = client.post(
+        "/run", json=_valid_payload(backend="codex", model="some-future-model-v9"), headers=_auth(),
+    )
+    assert r.status_code == 200
 
 
-def test_claude_model_on_codex_backend_is_400(client):
-    # Guards against cross-backend model confusion.
-    r = client.post("/run", json=_valid_payload(backend="codex", model="opus"), headers=_auth())
-    assert r.status_code == 400
+def test_cross_backend_model_accepted_at_runner(client, monkeypatch):
+    # Cross-backend confusion (e.g. claude alias passed to codex) is also
+    # delegated to the CLI, which errors with a real "model not found".
+    monkeypatch.setattr(runner_main, "_run_job", _fake_run_job)
+    r = client.post(
+        "/run", json=_valid_payload(backend="codex", model="opus"), headers=_auth(),
+    )
+    assert r.status_code == 200
+
+
+def test_dash_prefix_model_rejected(client):
+    # Shape-only check still rejects argv-injection attempts.
+    r = client.post(
+        "/run", json=_valid_payload(model="-rf"), headers=_auth(),
+    )
+    assert r.status_code in (400, 422)
+
+
+def test_oversized_model_rejected(client):
+    r = client.post(
+        "/run", json=_valid_payload(model="x" * 100), headers=_auth(),
+    )
+    assert r.status_code in (400, 422)
 
 
 def test_directive_starting_with_dash_is_422(client):
@@ -213,10 +238,38 @@ def test_claude_argv_has_no_tools_when_read_disabled():
     assert "--allowedTools" not in argv
 
 
-def test_claude_off_allowlist_model_rejected():
+def test_build_argv_accepts_arbitrary_model_string():
+    # Allowlist removed: build_argv only enforces shape (non-empty, no leading
+    # '-', length ≤ 64). Any plausible model slug builds successfully and the
+    # CLI later decides if it's real.
+    argv = ai_argv.build_argv(
+        backend="claude", task="ask", model="claude-sonnet-4-7-future",
+        directive="Answer.", enable_read_file=False,
+    )
+    assert "--model" in argv
+    assert argv[argv.index("--model") + 1] == "claude-sonnet-4-7-future"
+
+
+def test_build_argv_rejects_empty_model():
     with pytest.raises(ValueError):
         ai_argv.build_argv(
-            backend="claude", task="ask", model="evil-model",
+            backend="claude", task="ask", model="",
+            directive="Answer.", enable_read_file=False,
+        )
+
+
+def test_build_argv_rejects_dash_prefix_model():
+    with pytest.raises(ValueError):
+        ai_argv.build_argv(
+            backend="codex", task="ask", model="-rm",
+            directive="Answer.", enable_read_file=False,
+        )
+
+
+def test_build_argv_rejects_oversized_model():
+    with pytest.raises(ValueError):
+        ai_argv.build_argv(
+            backend="codex", task="ask", model="x" * 100,
             directive="Answer.", enable_read_file=False,
         )
 

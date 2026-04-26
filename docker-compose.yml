@@ -23,4 +23,8 @@ services:
       - ${HOME}/.atlas/runner.env
     volumes:
       - ${HOME}/.atlas:${HOME}/.atlas
+      # Read-only single-file mount: the codex CLI maintains this cache on the
+      # host and Atlas reads it to populate the model picker. Single file (not
+      # the whole ~/.codex/) so we never expose codex auth or session state.
+      - ${HOME}/.codex/models_cache.json:${HOME}/.codex/models_cache.json:ro
     restart: unless-stopped

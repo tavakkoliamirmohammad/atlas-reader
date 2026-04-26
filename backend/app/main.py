@@ -23,6 +23,7 @@ from app import (
     ai_backend,
     arxiv,
     asker,
+    codex_models,
     conversations,
     db,
     digest,
@@ -143,6 +144,24 @@ async def get_health() -> dict:
         "default_backend": ai_backend.DEFAULT_BACKEND,
         "papers_today": len(papers.list_recent(days=1)),
     }
+
+
+@app.get("/api/models")
+async def get_models(backend: str) -> dict:
+    """Return the codex model list discovered from `~/.codex/models_cache.json`.
+
+    Only `backend=codex` is supported — claude uses three stable aliases
+    (`opus`, `sonnet`, `haiku`) hardcoded in the frontend.
+    """
+    if backend != "codex":
+        raise HTTPException(status_code=400, detail=f"models discovery not supported for backend {backend!r}")
+    try:
+        models = codex_models.load()
+    except FileNotFoundError:
+        raise HTTPException(status_code=503, detail="codex models cache not found — run codex once to populate")
+    except ValueError as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+    return {"models": models}
 
 
 def _row_to_dict(row) -> dict:
@@ -368,16 +387,6 @@ def _sse_format(chunk: str) -> bytes:
     return f"data: {payload}\n\n".encode("utf-8")
 
 
-def _normalize_model(value: str | None, backend: str) -> str | None:
-    """Return the model if it's in the allowlist for the chosen backend;
-    otherwise None so ai_backend picks the per-(backend, task) default."""
-    if not value:
-        return None
-    if value in ai_argv.allowed_models(backend):          # type: ignore[arg-type]
-        return value
-    return None
-
-
 @app.post("/api/summarize/{arxiv_id}")
 async def post_summarize(
     arxiv_id: str,
@@ -388,7 +397,7 @@ async def post_summarize(
         raise HTTPException(status_code=404, detail="paper not found")
 
     chosen_backend = ai_backend.normalize_backend(backend)
-    chosen_model = _normalize_model(model, chosen_backend)
+    chosen_model = model or None
 
     async def gen():
         try:
@@ -416,10 +425,7 @@ async def post_ask(
 
     # Query param wins, body is fallback.
     chosen_backend = ai_backend.normalize_backend(backend if backend is not None else body.backend)
-    chosen_model = _normalize_model(
-        model if model is not None else body.model,
-        chosen_backend,
-    )
+    chosen_model = (model if model is not None else body.model) or None
 
     async def gen():
         try:

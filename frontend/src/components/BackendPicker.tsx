@@ -44,7 +44,9 @@ export function BackendPicker({ available }: Props) {
             title={
               enabled
                 ? `Use ${label} for summarize / ask / ranking`
-                : `${label} CLI not available on the host`
+                : value === "codex"
+                  ? "Codex unavailable — install the codex CLI and run it once to populate the model list"
+                  : `${label} CLI not available on the host`
             }
           >
             {label}

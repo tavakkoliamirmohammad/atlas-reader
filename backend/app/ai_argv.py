@@ -9,9 +9,10 @@ Invariants enforced here:
   (double-override against any ambient ~/.codex/config.toml).
 - claude only gets tool access when the caller explicitly passes
   `enable_read_file`; even then it's Read-only, no Write/Bash/WebFetch.
-- Directives and models come from allowlists; anything else raises ValueError.
-- The directive is passed through `--` on the codex side so it can never be
-  reinterpreted as a flag.
+- Models pass a shape check only (non-empty, no leading `-`, ≤ MAX_MODEL_LEN
+  chars); the CLIs reject unknown slugs themselves with their own errors.
+- Directives are non-empty, must not start with `-`, and on the codex side
+  go after `--` so they can never be reinterpreted as flags.
 """
 
 from __future__ import annotations
@@ -22,18 +23,7 @@ from typing import Literal
 Backend = Literal["claude", "codex"]
 Task = Literal["summarize", "ask", "rank", "glossary"]
 
-CLAUDE_MODELS = frozenset({"opus", "sonnet", "haiku"})
-# Codex CLI model identifiers (as of codex-cli 0.121). These match the strings
-# codex accepts via `-m`. Dotted names are real.
-CODEX_MODELS = frozenset({
-    "gpt-5.4",
-    "gpt-5.4-mini",
-    "gpt-5.3-codex",
-    "gpt-5.2",
-    "gpt-5.2-codex",
-    "gpt-5.1-codex-max",
-    "gpt-5.1-codex-mini",
-})
+MAX_MODEL_LEN = 64
 
 # Claude stream flags — NDJSON partial-message streaming.
 _CLAUDE_STREAM = (
@@ -53,13 +43,14 @@ _CODEX_LOCKDOWN = (
 )
 
 
-def allowed_models(backend: Backend) -> frozenset[str]:
-    return CLAUDE_MODELS if backend == "claude" else CODEX_MODELS
-
-
 def validate_model(backend: Backend, model: str) -> None:
-    if model not in allowed_models(backend):
-        raise ValueError(f"model {model!r} not in allowlist for backend {backend!r}")
+    """Shape check only. The downstream CLI decides if the slug is real."""
+    if not model:
+        raise ValueError("model must be non-empty")
+    if model.startswith("-"):
+        raise ValueError("model must not start with '-'")
+    if len(model) > MAX_MODEL_LEN:
+        raise ValueError(f"model exceeds {MAX_MODEL_LEN} chars")
 
 
 def build_argv(

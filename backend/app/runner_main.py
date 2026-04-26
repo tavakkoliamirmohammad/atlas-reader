@@ -38,7 +38,7 @@ from pydantic import BaseModel, Field, field_validator
 
 import uvicorn
 
-from app import ai_argv, ai_local, db, port_config, secret_store, subprocess_spawn
+from app import ai_argv, ai_local, codex_models, db, port_config, secret_store, subprocess_spawn
 
 
 log = logging.getLogger("atlas.runner")
@@ -50,12 +50,9 @@ MAX_DIRECTIVE_LEN = 512
 MAX_READ_PATH_LEN = 1024
 CONCURRENCY = 4
 RATE_LIMIT_PER_MIN = 30
-TIMEOUTS_SECONDS = {
-    "summarize": 180,
-    "ask": 90,
-    "rank": 60,
-    "glossary": 60,
-}
+# Per-readline (stall) timeout — the clock resets every time the subprocess
+# emits an NDJSON line. Total wall-clock is unbounded; only true silence kills.
+IDLE_TIMEOUT_S = float(os.environ.get("ATLAS_IDLE_TIMEOUT_S", "300"))
 
 
 # ---------- request model ----------
@@ -161,10 +158,15 @@ async def _security(request: Request, call_next):
 # ---------- endpoints ----------
 @app.get("/health")
 async def get_health() -> dict:
-    """Report which backend CLIs work on the host."""
+    """Report which backend CLIs are usable on the host.
+
+    Codex requires both the binary AND its model cache (`~/.codex/models_cache.json`)
+    so the picker has something to populate; otherwise we'd advertise codex as
+    available but the user would land on an empty dropdown.
+    """
     return {
         "claude": await _probe("claude", ["--version"]),
-        "codex": await _probe("codex", ["--version"]),
+        "codex": await _probe("codex", ["--version"]) and codex_models.cache_exists(),
     }
 
 
@@ -192,15 +194,14 @@ async def post_run(body: RunRequest) -> StreamingResponse:
     if not await _rate.allow():
         raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, detail=f"rate limit ({RATE_LIMIT_PER_MIN}/min)")
 
-    # Duplicate of ai_argv's check so we return 400 not 500.
-    if body.model not in ai_argv.allowed_models(body.backend):
-        raise HTTPException(
-            status.HTTP_400_BAD_REQUEST,
-            detail=f"model {body.model!r} not allowed for backend {body.backend!r}",
-        )
+    # Shape-only model validation (non-empty, no leading '-', length cap).
+    # The CLI itself rejects unknown slugs with its own error.
+    try:
+        ai_argv.validate_model(body.backend, body.model)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
     job_id = uuid.uuid4().hex[:12]
-    timeout_s = TIMEOUTS_SECONDS[body.task]
 
     async def stream() -> AsyncIterator[bytes]:
         started = time.monotonic()
@@ -208,13 +209,13 @@ async def post_run(body: RunRequest) -> StreamingResponse:
         bytes_out = 0
         try:
             async with _sem:
-                async for event in _run_job(body, timeout_s):
+                async for event in _run_job(body, IDLE_TIMEOUT_S):
                     data = json.dumps(event, ensure_ascii=False).encode("utf-8") + b"\n"
                     bytes_out += len(data)
                     yield data
         except asyncio.TimeoutError:
-            status_tag = "timeout"
-            yield (json.dumps({"type": "error", "message": "timeout"}) + "\n").encode("utf-8")
+            status_tag = "idle_timeout"
+            yield (json.dumps({"type": "error", "message": "idle timeout"}) + "\n").encode("utf-8")
         except Exception as exc:          # noqa: BLE001
             status_tag = "error"
             log.exception("job %s failed", job_id)
@@ -229,7 +230,7 @@ async def post_run(body: RunRequest) -> StreamingResponse:
     return StreamingResponse(stream(), media_type="application/x-ndjson")
 
 
-async def _run_job(body: RunRequest, timeout_s: int) -> AsyncIterator[dict]:
+async def _run_job(body: RunRequest, idle_timeout_s: float) -> AsyncIterator[dict]:
     """Wrap the shared streamer and frame each chunk as an NDJSON text event."""
     async for text in ai_local.stream_text(
         backend=body.backend,
@@ -238,7 +239,7 @@ async def _run_job(body: RunRequest, timeout_s: int) -> AsyncIterator[dict]:
         directive=body.directive,
         prompt=body.prompt,
         enable_read_file=body.enable_read_file,
-        timeout_s=float(timeout_s),
+        idle_timeout_s=idle_timeout_s,
     ):
         yield {"type": "text", "text": text}
 

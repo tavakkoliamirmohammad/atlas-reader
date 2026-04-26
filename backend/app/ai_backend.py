@@ -17,7 +17,7 @@ from typing import AsyncIterator, Literal, Optional
 
 import httpx
 
-from app import ai_local, secret_store
+from app import ai_local, codex_models, secret_store
 
 
 Backend = Literal["claude", "codex"]
@@ -41,7 +41,10 @@ _DEFAULT_MODELS: dict[Backend, dict[Task, str]] = {
 
 DEFAULT_BACKEND: Backend = "codex"
 
-PROXY_TIMEOUT_S = 240.0       # overall per-task cap; runner has its own per-task timeout
+# httpx timeout for the proxy stream — applied per-read of the runner's
+# response body. Mirrors the runner's idle timeout so the HTTP layer doesn't
+# give up before the runner does.
+PROXY_IDLE_TIMEOUT_S = float(os.environ.get("ATLAS_IDLE_TIMEOUT_S", "300"))
 
 
 def default_model(backend: Backend, task: Task) -> str:
@@ -112,7 +115,10 @@ async def _run_proxy(
     url = base_url.rstrip("/") + "/run"
     headers = {"Authorization": f"Bearer {secret}"}
 
-    async with httpx.AsyncClient(timeout=PROXY_TIMEOUT_S) as client:
+    # connect/read/write/pool: only the read deadline matters here, since the
+    # runner streams NDJSON as it arrives. Pool/connect can be small.
+    timeout = httpx.Timeout(connect=10.0, read=PROXY_IDLE_TIMEOUT_S, write=30.0, pool=10.0)
+    async with httpx.AsyncClient(timeout=timeout) as client:
         async with client.stream("POST", url, json=payload, headers=headers) as resp:
             if resp.status_code >= 400:
                 detail = (await resp.aread()).decode("utf-8", "replace")[:500]
@@ -134,7 +140,12 @@ async def _run_proxy(
 
 
 async def available_backends() -> dict[str, bool]:
-    """Return {claude: bool, codex: bool}. In proxy mode, ask the runner."""
+    """Return {claude: bool, codex: bool}.
+
+    Codex is only "available" if both the binary works AND the codex models
+    cache exists, since without the cache the picker has nothing to populate.
+    The runner reports the same combined boolean in proxy mode.
+    """
     proxy_url = os.environ.get("ATLAS_AI_PROXY")
     if proxy_url:
         secret = secret_store.load()
@@ -157,7 +168,7 @@ async def available_backends() -> dict[str, bool]:
     # Host mode: probe directly.
     return {
         "claude": await _local_cli_ok("claude"),
-        "codex": await _local_cli_ok("codex"),
+        "codex": await _local_cli_ok("codex") and codex_models.cache_exists(),
     }
 
 

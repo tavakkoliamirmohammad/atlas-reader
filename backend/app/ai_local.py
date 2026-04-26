@@ -11,17 +11,22 @@ Contracts:
   same in both paths.
 - Raises `RuntimeError` on non-zero exit; the caller is responsible for
   translating that into a user-visible error.
-- Honors the caller-supplied `timeout_s` via `asyncio.timeout`.
+- Honors `idle_timeout_s` as a per-readline (stall) timeout — the clock resets
+  every time a chunk arrives. A continuously-streaming subprocess is never
+  killed by Atlas; only true silence longer than `idle_timeout_s` triggers
+  `asyncio.TimeoutError`.
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
-from pathlib import Path
 from typing import AsyncIterator, Optional
 
 from app import ai_argv, ai_stream, db, subprocess_spawn
+
+
+DEFAULT_IDLE_TIMEOUT_S = 300.0
 
 
 async def stream_text(
@@ -31,13 +36,15 @@ async def stream_text(
     directive: str,
     prompt: str,
     enable_read_file: Optional[str] = None,
-    timeout_s: float = 180.0,
+    idle_timeout_s: float = DEFAULT_IDLE_TIMEOUT_S,
 ) -> AsyncIterator[str]:
     """Yield text chunks from claude/codex as they stream.
 
     `enable_read_file` — when set, the argv builder enables the Read tool
     (claude) or leaves the read-only sandbox enabled (codex). The actual path
     is not passed on the command line; the prompt already references it.
+    `idle_timeout_s` — kill the subprocess if no NDJSON line arrives for this
+    many seconds. Total elapsed time is unbounded.
     """
     argv = ai_argv.build_argv(
         backend=backend,          # type: ignore[arg-type]
@@ -67,43 +74,43 @@ async def stream_text(
     captured_error: Optional[str] = None
 
     try:
-        async with asyncio.timeout(timeout_s):
-            while True:
-                raw = await proc.stdout.readline()
-                if not raw:
-                    break
-                line = raw.decode("utf-8", errors="replace").strip()
-                if not line:
-                    continue
-                try:
-                    event = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
+        while True:
+            # Per-readline idle timeout: clock resets on every line received.
+            raw = await asyncio.wait_for(proc.stdout.readline(), timeout=idle_timeout_s)
+            if not raw:
+                break
+            line = raw.decode("utf-8", errors="replace").strip()
+            if not line:
+                continue
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
 
-                # Codex reports errors in the stdout stream, not stderr — so
-                # check for an error event before treating it like a text event.
-                if backend == "codex":
-                    err_msg = ai_stream.codex_error(event)
-                    if err_msg:
-                        captured_error = err_msg
+            # Codex reports errors in the stdout stream, not stderr — so
+            # check for an error event before treating it like a text event.
+            if backend == "codex":
+                err_msg = ai_stream.codex_error(event)
+                if err_msg:
+                    captured_error = err_msg
 
-                delta, final = ai_stream.extract(backend, event)
-                if delta:
-                    seen_delta = True
-                    yield delta
-                    continue
-                if final is not None:
-                    deferred_final = final
+            delta, final = ai_stream.extract(backend, event)
+            if delta:
+                seen_delta = True
+                yield delta
+                continue
+            if final is not None:
+                deferred_final = final
 
-            if not seen_delta and deferred_final:
-                yield deferred_final
+        if not seen_delta and deferred_final:
+            yield deferred_final
 
-            await proc.wait()
-            if proc.returncode != 0:
-                if captured_error:
-                    raise RuntimeError(f"{backend}: {captured_error}")
-                err = (await proc.stderr.read()).decode("utf-8", errors="replace")
-                raise RuntimeError(f"{backend} exited {proc.returncode}: {err[:500]}")
+        await proc.wait()
+        if proc.returncode != 0:
+            if captured_error:
+                raise RuntimeError(f"{backend}: {captured_error}")
+            err = (await proc.stderr.read()).decode("utf-8", errors="replace")
+            raise RuntimeError(f"{backend} exited {proc.returncode}: {err[:500]}")
     finally:
         if proc.returncode is None:
             try:

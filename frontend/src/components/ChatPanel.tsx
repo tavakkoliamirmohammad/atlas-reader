@@ -3,31 +3,22 @@ import { useMatch } from "react-router-dom";
 import { Trash2 } from "lucide-react";
 import {
   type ChatMessage,
-  CODEX_MODEL_OPTIONS,
+  type CodexModelInfo,
   clearConversation,
   fetchConversations,
+  getCodexModels,
   streamAsk,
   streamSummary,
 } from "@/lib/api";
 import { StreamingMessage } from "./StreamingMessage";
 import { QuickActionChips } from "./QuickActionChips";
 import { Glossary } from "./Glossary";
-import { useUiStore, type CodexModel, type ModelChoice } from "@/stores/ui-store";
+import { useUiStore, type ModelChoice } from "@/stores/ui-store";
 
 const CLAUDE_MODEL_META: Record<ModelChoice, { label: string; tag: string }> = {
   opus:   { label: "Opus",   tag: "deepest"  },
   sonnet: { label: "Sonnet", tag: "balanced" },
   haiku:  { label: "Haiku",  tag: "fastest"  },
-};
-
-const CODEX_MODEL_META: Record<CodexModel, { label: string; tag: string }> = {
-  "gpt-5.4":            { label: "GPT-5.4",           tag: "current"  },
-  "gpt-5.4-mini":       { label: "GPT-5.4 mini",      tag: "smaller"  },
-  "gpt-5.3-codex":      { label: "GPT-5.3 Codex",     tag: "codex"    },
-  "gpt-5.2":            { label: "GPT-5.2",           tag: "long-run" },
-  "gpt-5.2-codex":      { label: "GPT-5.2 Codex",     tag: "codex"    },
-  "gpt-5.1-codex-max":  { label: "GPT-5.1 Codex Max", tag: "reasoning"},
-  "gpt-5.1-codex-mini": { label: "GPT-5.1 Codex mini",tag: "cheap"    },
 };
 
 type GenericPickerProps<T extends string> = {
@@ -52,6 +43,10 @@ function GenericModelPicker<T extends string>({
     return () => document.removeEventListener("mousedown", onDocClick);
   }, [open]);
 
+  // Fall back to the raw slug while options are still loading.
+  const labelOf = (m: T): string => meta[m]?.label ?? m;
+  const tagOf = (m: T): string => meta[m]?.tag ?? "";
+
   return (
     <div ref={ref} className="relative">
       <button
@@ -63,7 +58,7 @@ function GenericModelPicker<T extends string>({
         className="model-pill inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-[11px] hover:border-[color:var(--ac1-mid)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
       >
         <span className="w-1.5 h-1.5 rounded-full" style={{ background: "var(--ac1)" }} />
-        <span>{meta[model].label}</span>
+        <span>{labelOf(model)}</span>
         <svg width="9" height="9" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
           <path d="M3 4.5l3 3 3-3" />
         </svg>
@@ -99,10 +94,10 @@ function GenericModelPicker<T extends string>({
                     style={{ background: active ? "var(--ac1)" : "rgb(100 116 139)" }}
                   />
                   <span className={active ? "text-slate-100 font-medium" : "text-slate-300"}>
-                    {meta[m].label}
+                    {labelOf(m)}
                   </span>
                 </span>
-                <span className="text-[10px] text-slate-400">{meta[m].tag}</span>
+                <span className="text-[10px] text-slate-400">{tagOf(m)}</span>
               </button>
             );
           })}
@@ -130,6 +125,30 @@ export function ChatPanel() {
   const codexModel = useUiStore((s) => s.codexModel);
   const setCodexModel = useUiStore((s) => s.setCodexModel);
   const backend = useUiStore((s) => s.backend);
+
+  // Discover codex models from `~/.codex/models_cache.json` via the backend.
+  // Only fetched when codex is the active backend; the picker won't render
+  // for any other state. If the persisted `codexModel` no longer appears in
+  // the fetched list (model retired, fresh install, etc.), swap to the first
+  // by codex's own priority order.
+  const [codexModels, setCodexModels] = useState<CodexModelInfo[]>([]);
+  useEffect(() => {
+    if (backend !== "codex") return;
+    let cancelled = false;
+    getCodexModels()
+      .then((list) => {
+        if (cancelled || list.length === 0) return;
+        setCodexModels(list);
+        if (!list.some((m) => m.slug === codexModel)) {
+          setCodexModel(list[0].slug);
+        }
+      })
+      .catch(() => { /* picker just stays empty; user shouldn't reach here */ });
+    return () => { cancelled = true; };
+    // codexModel isn't a dep — we only want to re-fetch on backend switch,
+    // and we read codexModel inside via the closure for the swap check.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [backend]);
   const summarizeRequestId = useUiStore((s) => s.summarizeRequestId);
   const askRequest = useUiStore((s) => s.askRequest);
   const pinnedQuote = useUiStore((s) => s.pinnedQuote);
@@ -422,10 +441,12 @@ export function ChatPanel() {
             ) : (
               <GenericModelPicker
                 model={codexModel}
-                options={CODEX_MODEL_OPTIONS}
-                meta={CODEX_MODEL_META}
+                options={codexModels.map((m) => m.slug)}
+                meta={Object.fromEntries(
+                  codexModels.map((m) => [m.slug, { label: m.label, tag: m.description }]),
+                ) as Record<string, { label: string; tag: string }>}
                 onChange={setCodexModel}
-                disabled={streaming}
+                disabled={streaming || codexModels.length === 0}
               />
             )}
             <div className="flex items-center gap-2">
