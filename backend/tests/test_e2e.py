@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -13,7 +14,10 @@ from app.main import app
 async def test_full_round_trip_health_digest_paper_pdf(atlas_data_dir, fixtures_dir):
     """Build today's digest, fetch the digest, fetch one paper, fetch its PDF."""
     db.init()
-    pl = [Paper("99", "Title", "A", "An abstract", "cs.PL", "2026-04-19T08:00:00Z")]
+    # Yesterday — inside list_recent's 7-day window so the digest pipeline
+    # surfaces this paper regardless of when the test is run.
+    recent_iso = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    pl = [Paper("99", "Title", "A", "An abstract", "cs.PL", recent_iso)]
     empty: list[Paper] = []
     pdf_bytes = (fixtures_dir / "tiny.pdf").read_bytes()
 

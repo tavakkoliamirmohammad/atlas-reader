@@ -1,3 +1,5 @@
+from datetime import datetime, timedelta, timezone
+
 import pytest
 from unittest.mock import AsyncMock, patch
 
@@ -5,8 +7,14 @@ from app import db, digest, papers
 from app.arxiv import Paper
 
 
+def _iso_days_ago(days: int) -> str:
+    return (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def _make(aid: str, title: str, cat: str) -> Paper:
-    return Paper(aid, title, "A", "<abstract discarded>", cat, "2026-04-19T08:00:00Z")
+    # Yesterday — comfortably inside digest's 7-day list_recent window so the
+    # test doesn't age out of validity over time.
+    return Paper(aid, title, "A", "<abstract discarded>", cat, _iso_days_ago(1))
 
 
 @pytest.mark.asyncio

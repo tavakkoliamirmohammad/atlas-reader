@@ -1,3 +1,5 @@
+from datetime import datetime, timedelta, timezone
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 from unittest.mock import AsyncMock, patch
@@ -457,8 +459,9 @@ async def test_digest_days_all_returns_every_paper(atlas_data_dir):
     db.init()
     from app.arxiv import Paper
     # Seed one recent + one ancient paper.
+    recent_iso = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
     papers.upsert([
-        Paper("rangeA", "recent", "A", "x", "cs.PL", "2026-04-19T08:00:00Z"),
+        Paper("rangeA", "recent", "A", "x", "cs.PL", recent_iso),
         Paper("rangeB", "ancient", "A", "x", "cs.PL", "2019-01-01T00:00:00Z"),
     ])
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
