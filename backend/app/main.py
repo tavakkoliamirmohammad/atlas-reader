@@ -150,11 +150,29 @@ async def get_health() -> dict:
 async def get_models(backend: str) -> dict:
     """Return the codex model list discovered from `~/.codex/models_cache.json`.
 
-    Only `backend=codex` is supported — claude uses three stable aliases
-    (`opus`, `sonnet`, `haiku`) hardcoded in the frontend.
+    In Docker mode the host path isn't visible to the container, so we
+    proxy through the runner (which lives on the host alongside `~/.codex/`).
+    In host mode we read the cache directly. Only `backend=codex` is supported
+    — claude uses three stable aliases hardcoded in the frontend.
     """
     if backend != "codex":
         raise HTTPException(status_code=400, detail=f"models discovery not supported for backend {backend!r}")
+
+    if os.environ.get("ATLAS_AI_PROXY"):
+        try:
+            models = await ai_backend.codex_models_via_runner()
+        except httpx.HTTPStatusError as exc:
+            # Pass the runner's status through unchanged so the frontend sees
+            # the same shape it would in host mode.
+            try:
+                detail = exc.response.json().get("detail", str(exc))
+            except Exception:                              # noqa: BLE001
+                detail = str(exc)
+            raise HTTPException(status_code=exc.response.status_code, detail=detail)
+        except (httpx.RequestError, RuntimeError) as exc:
+            raise HTTPException(status_code=502, detail=f"runner unreachable: {exc}")
+        return {"models": models}
+
     try:
         models = codex_models.load()
     except FileNotFoundError:

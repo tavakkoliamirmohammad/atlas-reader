@@ -68,9 +68,19 @@ def load() -> list[CodexModel]:
     return [
         CodexModel(
             slug=str(m.get("slug", "")),
-            label=str(m.get("display_name") or m.get("slug", "")),
+            label=_normalize_label(m.get("display_name") or m.get("slug", "")),
             description=str(m.get("description", "")),
         )
         for m in visible
         if m.get("slug")
     ]
+
+
+def _normalize_label(label: str) -> str:
+    """Codex's display_name field is inconsistent — some entries are
+    "GPT-5.5", others are "gpt-5.4" or "gpt-5.3-codex". Normalize the leading
+    `gpt-` prefix to uppercase so the picker doesn't mix capitalizations."""
+    s = str(label)
+    if s.lower().startswith("gpt-"):
+        return "GPT-" + s[4:]
+    return s

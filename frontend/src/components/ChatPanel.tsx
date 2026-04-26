@@ -65,7 +65,7 @@ function GenericModelPicker<T extends string>({
       </button>
       {open && (
         <div
-          className="absolute bottom-full left-0 mb-1.5 w-44 rounded-xl backdrop-blur-md shadow-2xl overflow-hidden z-30"
+          className="absolute bottom-full left-0 mb-1.5 w-56 max-h-[55vh] overflow-y-auto rounded-xl backdrop-blur-md shadow-2xl z-30 divide-y divide-white/5"
           role="listbox"
           style={{
             background: "var(--surface-overlay)",
@@ -75,6 +75,7 @@ function GenericModelPicker<T extends string>({
         >
           {options.map((m) => {
             const active = m === model;
+            const description = tagOf(m);
             return (
               <button
                 key={m}
@@ -83,21 +84,30 @@ function GenericModelPicker<T extends string>({
                 aria-selected={active}
                 onClick={() => { onChange(m); setOpen(false); }}
                 className={[
-                  "w-full flex items-center justify-between px-3 py-2 text-left text-[12px]",
+                  "w-full flex items-start gap-2 px-2.5 py-2 text-left",
                   "hover:bg-white/5 transition-colors cursor-pointer",
                   active ? "bg-[color:var(--ac1-soft)]" : "",
                 ].join(" ")}
               >
-                <span className="flex items-center gap-2">
+                <span
+                  className="mt-1 shrink-0 w-1 h-1 rounded-full"
+                  style={{ background: active ? "var(--ac1)" : "rgb(100 116 139)" }}
+                />
+                <span className="flex-1 min-w-0 flex flex-col leading-tight">
                   <span
-                    className="w-1.5 h-1.5 rounded-full"
-                    style={{ background: active ? "var(--ac1)" : "rgb(100 116 139)" }}
-                  />
-                  <span className={active ? "text-slate-100 font-medium" : "text-slate-300"}>
+                    className={[
+                      "text-[11px] truncate",
+                      active ? "text-slate-100 font-medium" : "text-slate-200",
+                    ].join(" ")}
+                  >
                     {labelOf(m)}
                   </span>
+                  {description && (
+                    <span className="mt-1 text-[10px] leading-snug text-slate-400 break-words">
+                      {description}
+                    </span>
+                  )}
                 </span>
-                <span className="text-[10px] text-slate-400">{tagOf(m)}</span>
               </button>
             );
           })}

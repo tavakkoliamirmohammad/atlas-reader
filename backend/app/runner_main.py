@@ -170,6 +170,19 @@ async def get_health() -> dict:
     }
 
 
+@app.get("/models")
+async def get_models() -> dict:
+    """Return the codex model list. Backend proxies here in Docker mode so we
+    don't need to bind-mount `~/.codex/` into the container."""
+    try:
+        models = codex_models.load()
+    except FileNotFoundError:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail="codex models cache not found")
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
+    return {"models": models}
+
+
 async def _probe(cmd: str, args: list[str]) -> bool:
     try:
         proc = await subprocess_spawn.spawn(

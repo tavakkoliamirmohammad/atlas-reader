@@ -24,20 +24,15 @@ Backend = Literal["claude", "codex"]
 Task = Literal["summarize", "ask", "rank", "glossary"]
 
 
-# Per-(backend, task) default model. Claude has established Atlas conventions;
-# Codex v1 maps every task to `gpt-5` — we can differentiate later if needed.
-_DEFAULT_MODELS: dict[Backend, dict[Task, str]] = {
-    "claude": {"summarize": "opus", "ask": "sonnet", "rank": "haiku", "glossary": "sonnet"},
-    # gpt-5.4 is the current flagship; gpt-5.4-mini is the cheap tier that
-    # actually works on ChatGPT plans (gpt-5.1-codex-mini is listed in the
-    # codex CLI selector but rejected by the API for ChatGPT accounts).
-    "codex":  {
-        "summarize": "gpt-5.4",
-        "ask":       "gpt-5.4",
-        "rank":      "gpt-5.4-mini",
-        "glossary":  "gpt-5.4-mini",
-    },
+# Claude defaults are aliases — the Anthropic CLI auto-resolves each to the
+# latest concrete model, so this set never goes stale.
+_CLAUDE_DEFAULTS: dict[Task, str] = {
+    "summarize": "opus", "ask": "sonnet", "rank": "haiku", "glossary": "sonnet",
 }
+# Codex last-resort fallback when the cache is unreadable. Picked because it's
+# been the codex CLI's stable mid-tier for a while; if it gets retired, the
+# dynamic lookup below picks the new top model from the cache instead.
+_CODEX_FALLBACK = "gpt-5.4"
 
 DEFAULT_BACKEND: Backend = "codex"
 
@@ -47,8 +42,30 @@ DEFAULT_BACKEND: Backend = "codex"
 PROXY_IDLE_TIMEOUT_S = float(os.environ.get("ATLAS_IDLE_TIMEOUT_S", "300"))
 
 
-def default_model(backend: Backend, task: Task) -> str:
-    return _DEFAULT_MODELS[backend][task]
+async def default_model(backend: Backend, task: Task) -> str:
+    """Pick a default when the caller didn't supply a model.
+
+    Claude uses stable aliases that auto-resolve to the latest model. Codex
+    derives from the host's `models_cache.json` (the same source the picker
+    reads), so a retired hardcoded slug can never sneak into production.
+    Falls back to `_CODEX_FALLBACK` only when the cache is unreadable.
+    """
+    if backend == "claude":
+        return _CLAUDE_DEFAULTS[task]
+    try:
+        if os.environ.get("ATLAS_AI_PROXY"):
+            models = await codex_models_via_runner()
+        else:
+            models = [dict(m) for m in codex_models.load()]
+    except Exception:                      # noqa: BLE001
+        return _CODEX_FALLBACK
+    if not models:
+        return _CODEX_FALLBACK
+    # Cheaper tier for non-interactive jobs (rank, glossary). models is
+    # priority-ascending in codex_models.load, so [0] is the top tier and [-1]
+    # is the cheapest.
+    cheap = task in ("rank", "glossary")
+    return str((models[-1] if cheap and len(models) > 1 else models[0]).get("slug") or _CODEX_FALLBACK)
 
 
 def normalize_backend(value: Optional[str]) -> Backend:
@@ -68,7 +85,7 @@ async def run_ai(
     enable_read_file: Optional[str] = None,
 ) -> AsyncIterator[str]:
     """Yield text chunks from the chosen backend."""
-    chosen_model = model or default_model(backend, task)
+    chosen_model = model or await default_model(backend, task)
     proxy_url = os.environ.get("ATLAS_AI_PROXY")
     if proxy_url:
         async for chunk in _run_proxy(
@@ -137,6 +154,29 @@ async def _run_proxy(
                         yield text
                 elif event.get("type") == "error":
                     raise RuntimeError(f"runner error: {event.get('message', 'unknown')}")
+
+
+async def codex_models_via_runner() -> list[dict]:
+    """Fetch codex model list via the runner. Used by `/api/models` in Docker
+    mode so the container doesn't need a bind-mount of `~/.codex/`.
+
+    Raises `RuntimeError` (no proxy / no secret), `httpx.HTTPStatusError`
+    (runner returned non-2xx), or `httpx.RequestError` (network).
+    """
+    proxy_url = os.environ.get("ATLAS_AI_PROXY")
+    if not proxy_url:
+        raise RuntimeError("not in proxy mode")
+    secret = secret_store.load()
+    if not secret:
+        raise RuntimeError("no runner secret available")
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        r = await client.get(
+            proxy_url.rstrip("/") + "/models",
+            headers={"Authorization": f"Bearer {secret}"},
+        )
+        r.raise_for_status()
+        data = r.json()
+        return list(data.get("models", []))
 
 
 async def available_backends() -> dict[str, bool]:

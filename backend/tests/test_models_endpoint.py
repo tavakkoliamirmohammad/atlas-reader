@@ -144,6 +144,85 @@ async def test_codex_available_when_cache_present(monkeypatch, fake_codex_home):
     assert out["codex"] is True
 
 
+def test_models_endpoint_proxies_to_runner_in_docker_mode(client, monkeypatch):
+    """In Docker mode the container can't read ~/.codex/. The backend proxies
+    /api/models to the runner instead of reading the file directly."""
+    monkeypatch.setenv("ATLAS_AI_PROXY", "http://host.docker.internal:8766")
+
+    async def fake_via_runner():
+        return [{"slug": "gpt-5.5", "label": "GPT-5.5", "description": "frontier"}]
+
+    monkeypatch.setattr(ai_backend, "codex_models_via_runner", fake_via_runner)
+
+    r = client.get("/api/models?backend=codex")
+    assert r.status_code == 200
+    assert r.json() == {"models": [{"slug": "gpt-5.5", "label": "GPT-5.5", "description": "frontier"}]}
+
+
+def test_models_endpoint_proxy_mode_502_when_runner_unreachable(client, monkeypatch):
+    monkeypatch.setenv("ATLAS_AI_PROXY", "http://host.docker.internal:8766")
+
+    async def fake_via_runner():
+        raise RuntimeError("no runner secret available")
+
+    monkeypatch.setattr(ai_backend, "codex_models_via_runner", fake_via_runner)
+
+    r = client.get("/api/models?backend=codex")
+    assert r.status_code == 502
+
+
+def test_models_endpoint_proxy_mode_passes_through_runner_503(client, monkeypatch):
+    """If the runner says 503 (cache missing on host), the backend mirrors that
+    status so the frontend sees the same shape it would in host mode."""
+    import httpx
+
+    monkeypatch.setenv("ATLAS_AI_PROXY", "http://host.docker.internal:8766")
+
+    async def fake_via_runner():
+        request = httpx.Request("GET", "http://x/models")
+        response = httpx.Response(503, json={"detail": "codex models cache not found"}, request=request)
+        raise httpx.HTTPStatusError("503", request=request, response=response)
+
+    monkeypatch.setattr(ai_backend, "codex_models_via_runner", fake_via_runner)
+
+    r = client.get("/api/models?backend=codex")
+    assert r.status_code == 503
+    assert "codex models cache not found" in r.json()["detail"]
+
+
+async def test_default_codex_model_picks_top_priority_from_cache(monkeypatch, fake_codex_home):
+    """The codex backend default for user-facing tasks tracks the cache's
+    top-priority model, so a retired hardcoded slug never sneaks in."""
+    monkeypatch.delenv("ATLAS_AI_PROXY", raising=False)
+    _write_cache(fake_codex_home, [
+        {"slug": "gpt-5.5", "display_name": "GPT-5.5", "description": "x",
+         "visibility": "list", "priority": 0},
+        {"slug": "gpt-5.4", "display_name": "GPT-5.4", "description": "x",
+         "visibility": "list", "priority": 1},
+        {"slug": "gpt-5.4-mini", "display_name": "GPT-5.4 mini", "description": "x",
+         "visibility": "list", "priority": 5},
+    ])
+
+    assert await ai_backend.default_model("codex", "summarize") == "gpt-5.5"
+    assert await ai_backend.default_model("codex", "ask") == "gpt-5.5"
+    # rank/glossary get the cheapest tier (last by ascending priority).
+    assert await ai_backend.default_model("codex", "rank") == "gpt-5.4-mini"
+    assert await ai_backend.default_model("codex", "glossary") == "gpt-5.4-mini"
+
+
+async def test_default_codex_model_falls_back_when_cache_missing(monkeypatch, fake_codex_home):
+    monkeypatch.delenv("ATLAS_AI_PROXY", raising=False)
+    # No cache file written.
+    assert await ai_backend.default_model("codex", "summarize") == ai_backend._CODEX_FALLBACK
+
+
+async def test_default_claude_model_uses_aliases(monkeypatch):
+    # Claude doesn't depend on the codex cache at all.
+    assert await ai_backend.default_model("claude", "summarize") == "opus"
+    assert await ai_backend.default_model("claude", "ask") == "sonnet"
+    assert await ai_backend.default_model("claude", "glossary") == "sonnet"
+
+
 async def test_codex_unavailable_when_binary_missing_even_with_cache(monkeypatch, fake_codex_home):
     monkeypatch.delenv("ATLAS_AI_PROXY", raising=False)
     _write_cache(fake_codex_home, [

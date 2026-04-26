@@ -98,7 +98,7 @@ async def ask(
     )
 
     normalized_backend = ai_backend.normalize_backend(backend)
-    resolved_model = model or ai_backend.default_model(normalized_backend, "ask")
+    resolved_model = model or await ai_backend.default_model(normalized_backend, "ask")
 
     # Collect the streamed chunks so we can persist the complete answer after
     # the stream ends. Yielding happens in real time; persistence is one SQL

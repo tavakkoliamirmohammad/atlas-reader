@@ -303,6 +303,32 @@ async def _fake_run_job(body, timeout_s):   # noqa: ARG001 - signature-matched f
     yield {"type": "text", "text": "hello"}
 
 
+def test_models_endpoint_returns_codex_list(client, monkeypatch, tmp_path):
+    """The runner exposes /models so the backend (in Docker) doesn't need a
+    bind-mount of ~/.codex/."""
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    (tmp_path / ".codex").mkdir()
+    (tmp_path / ".codex" / "models_cache.json").write_text(
+        '{"models":[{"slug":"gpt-5.5","display_name":"GPT-5.5","description":"x",'
+        '"visibility":"list","priority":0}]}'
+    )
+
+    r = client.get("/models", headers=_auth())
+    assert r.status_code == 200
+    assert r.json() == {"models": [{"slug": "gpt-5.5", "label": "GPT-5.5", "description": "x"}]}
+
+
+def test_models_endpoint_503_when_cache_missing(client, monkeypatch, tmp_path):
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    r = client.get("/models", headers=_auth())
+    assert r.status_code == 503
+
+
+def test_models_endpoint_requires_bearer(client):
+    r = client.get("/models", headers={"Host": "127.0.0.1"})
+    assert r.status_code == 401
+
+
 def test_ensure_preserves_existing_runner_env_keys(atlas_data_dir, monkeypatch):
     """secret_store.ensure() must not clobber port keys written by port_config.persist_ports.
 
