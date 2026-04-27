@@ -7,6 +7,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
+
+# Pre-install CPU-only torch from the PyTorch index BEFORE kokoro pulls
+# it in transitively. The default PyPI torch wheel declares NVIDIA CUDA
+# libs as runtime deps (cusolver, cusparse, cudnn — ~2 GB total) that
+# can't run on Apple Silicon and would bloat the image / fill the build
+# disk. The CPU-only index is much smaller and sufficient for our use.
+RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
+
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
