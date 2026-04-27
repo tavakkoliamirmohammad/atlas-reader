@@ -58,7 +58,7 @@ IDLE_TIMEOUT_S = float(os.environ.get("ATLAS_IDLE_TIMEOUT_S", "300"))
 # ---------- request model ----------
 class RunRequest(BaseModel):
     backend: Literal["claude", "codex"]
-    task: Literal["summarize", "ask", "rank", "glossary"]
+    task: Literal["summarize", "ask", "rank", "glossary", "podcast"]
     model: str
     directive: str = Field(min_length=1, max_length=MAX_DIRECTIVE_LEN)
     prompt: str  # sent via subprocess stdin; size checked below

@@ -21,7 +21,7 @@ from typing import Literal
 
 
 Backend = Literal["claude", "codex"]
-Task = Literal["summarize", "ask", "rank", "glossary"]
+Task = Literal["summarize", "ask", "rank", "glossary", "podcast"]
 
 MAX_MODEL_LEN = 64
 

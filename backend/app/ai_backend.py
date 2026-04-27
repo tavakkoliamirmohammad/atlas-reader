@@ -21,13 +21,14 @@ from app import ai_local, codex_models, secret_store
 
 
 Backend = Literal["claude", "codex"]
-Task = Literal["summarize", "ask", "rank", "glossary"]
+Task = Literal["summarize", "ask", "rank", "glossary", "podcast"]
 
 
 # Claude defaults are aliases — the Anthropic CLI auto-resolves each to the
 # latest concrete model, so this set never goes stale.
 _CLAUDE_DEFAULTS: dict[Task, str] = {
     "summarize": "opus", "ask": "sonnet", "rank": "haiku", "glossary": "sonnet",
+    "podcast": "opus",
 }
 # Codex last-resort fallback when the cache is unreadable. Picked because it's
 # been the codex CLI's stable mid-tier for a while; if it gets retired, the
