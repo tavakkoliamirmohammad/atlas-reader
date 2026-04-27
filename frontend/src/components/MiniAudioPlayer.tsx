@@ -8,6 +8,7 @@ import {
   X,
 } from "lucide-react";
 import { usePodcastStore } from "@/stores/podcast-store";
+import { PodcastTranscript } from "./PodcastTranscript";
 
 function formatTime(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds < 0) return "0:00";
@@ -239,6 +240,21 @@ export function MiniAudioPlayer() {
           role="region"
           aria-label="Podcast player"
         >
+          {transcriptOpen && current.segments.length > 0 && (
+            <div
+              className="border-b border-[var(--glass-border)]"
+              aria-label="Transcript"
+            >
+              <PodcastTranscript
+                segments={current.segments}
+                position={position}
+                onSeek={(s) => {
+                  if (audioRef.current) audioRef.current.currentTime = s;
+                  setPosition(s);
+                }}
+              />
+            </div>
+          )}
           <div className="flex items-center gap-3 px-4 h-[68px]">
             {/* Play / Pause */}
             <button
