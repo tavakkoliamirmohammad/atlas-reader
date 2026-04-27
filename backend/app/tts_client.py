@@ -46,16 +46,23 @@ async def synthesize(
     try:
         try:
             response = await c.post(f"{tts_url()}/synthesize", json=payload)
-        except httpx.ConnectError as e:
-            raise TtsUnavailableError(f"TTS service unreachable at {tts_url()}") from e
+        except httpx.HTTPError as e:
+            # Covers ConnectError, ReadTimeout, ReadError, RemoteProtocolError,
+            # PoolTimeout — anything that means "we never got a usable response."
+            raise TtsUnavailableError(
+                f"TTS service unreachable at {tts_url()}: {type(e).__name__}"
+            ) from e
     finally:
         if own_client:
             await c.aclose()
     if response.status_code >= 400:
         snippet = response.text[:200] if response.text else ""
         raise TtsSynthesisError(f"TTS returned {response.status_code}: {snippet}")
-    duration_header = response.headers.get("X-Audio-Duration-Ms", "0")
-    return TtsResult(wav_bytes=response.content, duration_ms=int(duration_header))
+    try:
+        duration_ms = int(response.headers.get("X-Audio-Duration-Ms", "0"))
+    except ValueError:
+        duration_ms = 0
+    return TtsResult(wav_bytes=response.content, duration_ms=duration_ms)
 
 
 async def health_ok(*, client: httpx.AsyncClient | None = None) -> bool:

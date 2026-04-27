@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import httpx
 import pytest
 
@@ -42,7 +44,6 @@ async def test_synthesize_passes_voice():
     captured = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
-        import json
         captured.update(json.loads(request.content))
         return httpx.Response(200, content=b"RIFF", headers={"X-Audio-Duration-Ms": "10"})
 
@@ -56,7 +57,6 @@ async def test_synthesize_default_voice():
     captured = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
-        import json
         captured.update(json.loads(request.content))
         return httpx.Response(200, content=b"RIFF", headers={"X-Audio-Duration-Ms": "10"})
 
@@ -73,6 +73,26 @@ async def test_synthesize_connect_error_raises_unavailable():
     async with _client(handler) as c:
         with pytest.raises(TtsUnavailableError):
             await synthesize("hi", client=c)
+
+
+async def test_synthesize_read_timeout_raises_unavailable():
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("timed out", request=request)
+
+    async with _client(handler) as c:
+        with pytest.raises(TtsUnavailableError) as exc_info:
+            await synthesize("hi", client=c)
+    assert "ReadTimeout" in str(exc_info.value)
+
+
+async def test_synthesize_malformed_duration_header_returns_zero():
+    def handler(request: httpx.Request) -> httpx.Response:
+        # Some sidecar versions might emit a float string by mistake.
+        return httpx.Response(200, content=b"RIFF", headers={"X-Audio-Duration-Ms": "1234.5"})
+
+    async with _client(handler) as c:
+        result = await synthesize("hi", client=c)
+    assert result.duration_ms == 0
 
 
 async def test_synthesize_5xx_raises_synthesis_error():
