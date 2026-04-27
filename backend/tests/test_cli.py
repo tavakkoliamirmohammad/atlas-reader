@@ -84,9 +84,15 @@ def test_up_exits_with_error_when_backend_port_in_use(capsys, atlas_data_dir):
 
 
 def test_up_exits_with_error_when_runner_port_in_use(capsys, atlas_data_dir):
+    # Backend port is free, runner port is busy. _find_runner_orphans returns
+    # [] so the new sweep-then-retry path falls straight through to the
+    # "still busy after sweep" error.
+    def fake_is_port_free(port: int) -> bool:
+        return port != 8766
     with patch("app.cli._have_docker", return_value=True), \
          patch("app.cli._start_runner"), \
-         patch("app.cli.port_config.is_port_free", side_effect=[True, False]):
+         patch("app.cli._find_runner_orphans", return_value=[]), \
+         patch("app.cli.port_config.is_port_free", side_effect=fake_is_port_free):
         rc = cli.main(["up"])
     assert rc != 0
     err = capsys.readouterr().err

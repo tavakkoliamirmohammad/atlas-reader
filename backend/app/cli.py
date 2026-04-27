@@ -102,16 +102,78 @@ def _start_runner() -> None:
     print(f"runner started (pid {proc.pid}) on http://127.0.0.1:{port_config.runner_port()}")
 
 
-def _stop_runner() -> None:
-    pid = _read_pid(_runner_pid_file())
-    if pid is None:
-        return
+def _find_runner_orphans(port: int) -> list[int]:
+    """Return PIDs holding `port` whose command line names runner_main.
+
+    Used by _stop_runner to sweep up orphans whose pidfile was lost — e.g.
+    when the CLI died between spawning the runner and writing the pidfile,
+    or when an earlier `atlas down` was interrupted. The command-line filter
+    is the safety belt: we never kill processes that don't look like our own
+    runner, even if they happen to bind the runner port.
+    """
     try:
-        os.kill(pid, signal.SIGTERM)
-    except ProcessLookupError:
-        pass
+        out = subprocess.run(
+            ["lsof", "-tiTCP:%d" % port, "-sTCP:LISTEN"],
+            capture_output=True, text=True, timeout=2,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return []
+    matches: list[int] = []
+    for line in out.stdout.splitlines():
+        try:
+            pid = int(line.strip())
+        except ValueError:
+            continue
+        try:
+            ps = subprocess.run(
+                ["ps", "-o", "command=", "-p", str(pid)],
+                capture_output=True, text=True, timeout=2,
+            )
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            continue
+        if "app.runner_main" in ps.stdout or "atlas-ai-runner" in ps.stdout:
+            matches.append(pid)
+    return matches
+
+
+def _stop_runner() -> None:
+    """Stop the tracked runner AND sweep up any orphans on the runner port.
+
+    Two things can leave orphans behind:
+    - The CLI dying between the Popen() and writing the pidfile, so the
+      runner exists but we have no record of it.
+    - An interrupted `atlas down` that killed the pidfile without sending
+      SIGTERM (or vice versa).
+
+    Without the sweep, the next `atlas up` errors with "runner port already
+    in use" because nobody owns the orphan.
+    """
+    tracked = _read_pid(_runner_pid_file())
+    killed: set[int] = set()
+    if tracked is not None:
+        try:
+            os.kill(tracked, signal.SIGTERM)
+            killed.add(tracked)
+        except ProcessLookupError:
+            pass
     _runner_pid_file().unlink(missing_ok=True)
-    print(f"runner stopped (pid {pid})")
+
+    for pid in _find_runner_orphans(port_config.runner_port()):
+        if pid in killed:
+            continue
+        try:
+            os.kill(pid, signal.SIGTERM)
+            killed.add(pid)
+        except ProcessLookupError:
+            pass
+
+    if not killed:
+        return
+    if len(killed) == 1:
+        print(f"runner stopped (pid {next(iter(killed))})")
+    else:
+        sorted_pids = sorted(killed)
+        print(f"runner stopped (pids {sorted_pids[0]} + {len(sorted_pids) - 1} orphan(s))")
 
 
 # ---------- docker helpers ----------
@@ -156,12 +218,31 @@ def cmd_up(args: argparse.Namespace) -> int:
     runner_pid = _read_pid(_runner_pid_file())
     runner_is_ours = runner_pid is not None and _is_alive(runner_pid)
     if not runner_is_ours and not port_config.is_port_free(runner_p):
-        print(
-            f"error: runner port {runner_p} is already in use on this host.\n"
-            f"       pass `atlas up --runner-port N` (or export ATLAS_RUNNER_PORT=N) to pick another.",
-            file=sys.stderr,
-        )
-        return 1
+        # Try to clean up an orphaned runner first (lost pidfile, interrupted
+        # down, etc.). The command-line match in _find_runner_orphans means we
+        # only kill processes that look like our own runner.
+        orphans = _find_runner_orphans(runner_p)
+        for pid in orphans:
+            try:
+                os.kill(pid, signal.SIGTERM)
+                print(f"reaped orphan runner (pid {pid})")
+            except ProcessLookupError:
+                pass
+        # Give the kernel a moment to release the port.
+        if orphans:
+            for _ in range(20):
+                if port_config.is_port_free(runner_p):
+                    break
+                time.sleep(0.1)
+        if not port_config.is_port_free(runner_p):
+            print(
+                f"error: runner port {runner_p} is already in use on this host"
+                + (" (orphan sweep didn't free it)" if orphans else "")
+                + ".\n       pass `atlas up --runner-port N` "
+                "(or export ATLAS_RUNNER_PORT=N) to pick another.",
+                file=sys.stderr,
+            )
+            return 1
 
     _start_runner()
 
