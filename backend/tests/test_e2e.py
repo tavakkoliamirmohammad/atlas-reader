@@ -55,6 +55,11 @@ async def test_full_round_trip_health_digest_paper_pdf(atlas_data_dir, fixtures_
             with patch(
                 "app.main.ai_backend.available_backends",
                 new=AsyncMock(return_value={"claude": False, "codex": False}),
+            ), patch(
+                # /api/health probes the TTS sidecar; the fake httpx client
+                # above doesn't implement .get, so short-circuit the probe.
+                "app.main.tts_client.health_ok",
+                new=AsyncMock(return_value=False),
             ):
                 async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
                     h = await c.get("/api/health")
