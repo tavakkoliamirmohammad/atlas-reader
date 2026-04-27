@@ -7,22 +7,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-
-# BUILD_VARIANT controls which PyTorch wheel index we use.
-#   cpu  (default) — works everywhere, including Docker on macOS (Apple
-#                    Silicon GPU is not reachable from the Linux VM).
-#   cuda           — pulls CUDA 12.1 wheels; only useful on Linux hosts
-#                    with an NVIDIA GPU + nvidia-container-toolkit, run
-#                    with `docker run --gpus all`.
-# Build CPU image:  docker build services/tts
-# Build CUDA image: docker build --build-arg BUILD_VARIANT=cuda services/tts
-ARG BUILD_VARIANT=cpu
-RUN if [ "$BUILD_VARIANT" = "cuda" ]; then \
-        pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cu121; \
-    else \
-        pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu; \
-    fi
-
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
