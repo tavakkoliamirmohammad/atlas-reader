@@ -106,7 +106,7 @@ export function QuickActionChips({
           </button>
           {pickerOpen && (
             <div
-              className="absolute bottom-full left-0 mb-1.5 w-44 rounded-xl backdrop-blur-md shadow-2xl z-30 overflow-hidden"
+              className="absolute bottom-full right-0 mb-2 w-44 rounded-xl backdrop-blur-md shadow-2xl z-30 overflow-hidden"
               role="menu"
               aria-label="Podcast length"
               style={{

@@ -46,7 +46,12 @@ export function MiniAudioPlayer() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [current?.url]);
 
-  // Wire audio element events → store.
+  // Wire audio element events → store. The <audio> element only renders
+  // when generationState === "ready", so audioRef is null on first mount.
+  // current?.url is in the deps so listeners attach the moment the audio
+  // element appears in the DOM (when the URL transitions from undefined to
+  // the cached mp3 path); without that dep the effect never re-runs and
+  // play/pause/timeupdate are never observed.
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio) return;
@@ -69,7 +74,7 @@ export function MiniAudioPlayer() {
       audio.removeEventListener("pause", onPause);
       audio.removeEventListener("ended", onEnded);
     };
-  }, [setPosition, setPlaying]);
+  }, [current?.url, setPosition, setPlaying]);
 
   function handlePlayPause() {
     const audio = audioRef.current;
@@ -245,17 +250,19 @@ export function MiniAudioPlayer() {
               className="border-b border-[var(--glass-border)]"
               aria-label="Transcript"
             >
-              <PodcastTranscript
-                segments={current.segments}
-                position={position}
-                onSeek={(s) => {
-                  if (audioRef.current) audioRef.current.currentTime = s;
-                  setPosition(s);
-                }}
-              />
+              <div className="max-w-4xl mx-auto">
+                <PodcastTranscript
+                  segments={current.segments}
+                  position={position}
+                  onSeek={(s) => {
+                    if (audioRef.current) audioRef.current.currentTime = s;
+                    setPosition(s);
+                  }}
+                />
+              </div>
             </div>
           )}
-          <div className="flex items-center gap-3 px-4 h-[68px]">
+          <div className="max-w-4xl mx-auto flex items-center gap-3 px-4 h-[68px]">
             {/* Play / Pause */}
             <button
               type="button"
