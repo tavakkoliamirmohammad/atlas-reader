@@ -62,7 +62,15 @@ def _data_dir() -> Path:
 
 
 def cache_paths(arxiv_id: str, length: str) -> tuple[Path, Path]:
-    """Return (mp3_path, json_path) -- neither must exist."""
+    """Return (mp3_path, json_path) -- neither must exist.
+
+    Raises ValueError if `arxiv_id` contains path-traversal segments.
+    GET and DELETE routes pass the URL-path arxiv_id straight in, so this
+    is the single chokepoint that converts an untrusted string into a
+    filesystem path.
+    """
+    if ".." in Path(arxiv_id).parts or "/" in arxiv_id or "\\" in arxiv_id:
+        raise ValueError(f"invalid arxiv_id: {arxiv_id!r}")
     base = _data_dir() / "podcasts" / arxiv_id
     return base / f"{length}.mp3", base / f"{length}.json"
 

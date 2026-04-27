@@ -126,6 +126,29 @@ def test_get_mp3_400_on_invalid_length(client: TestClient, tmp_path: Path, monke
     assert r.status_code == 400
 
 
+def test_get_mp3_400_on_path_traversal(client: TestClient, tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("ATLAS_DATA_DIR", str(tmp_path))
+
+    # Literal ".." reaches the route handler intact — our validator returns 400.
+    # (URL-encoded %2F variants are caught earlier by Starlette's router with 404,
+    # which is also blocking; we only have to guarantee the handler refuses what
+    # does reach it.)
+    r = client.get("/api/podcast/.../short.mp3")
+    assert r.status_code == 400
+
+
+def test_get_mp3_inline_disposition(client: TestClient, tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("ATLAS_DATA_DIR", str(tmp_path))
+    base = tmp_path / "podcasts" / "abc"
+    base.mkdir(parents=True)
+    (base / "short.mp3").write_bytes(b"FAKE")
+
+    r = client.get("/api/podcast/abc/short.mp3")
+    assert r.status_code == 200
+    # `inline` so <audio> can stream in-page; `attachment` would prompt save.
+    assert r.headers["content-disposition"].startswith("inline")
+
+
 # ---------------------------------------------------------------------------
 # GET /api/podcast/{arxiv_id}/{length}.json
 # ---------------------------------------------------------------------------

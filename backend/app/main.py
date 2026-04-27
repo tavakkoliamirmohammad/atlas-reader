@@ -503,22 +503,38 @@ async def post_podcast(body: PodcastBody):
     return StreamingResponse(gen(), media_type="text/event-stream")
 
 
-@app.get("/api/podcast/{arxiv_id}/{length}.mp3")
-async def get_podcast_mp3(arxiv_id: str, length: str):
+def _validate_podcast_path(arxiv_id: str, length: str) -> None:
+    """Reject bad path params before they reach the filesystem layer.
+
+    `length` must be one of the three known values; `arxiv_id` must not
+    contain path-traversal segments (cache_paths re-checks but we want a
+    clean 400 instead of a 500 when /api/podcast/..%2Fetc/short.mp3 hits).
+    """
     if length not in podcast.LENGTHS:
         raise HTTPException(status_code=400, detail="invalid length")
+    if ".." in arxiv_id or "/" in arxiv_id or "\\" in arxiv_id:
+        raise HTTPException(status_code=400, detail="invalid arxiv_id")
+
+
+@app.get("/api/podcast/{arxiv_id}/{length}.mp3")
+async def get_podcast_mp3(arxiv_id: str, length: str):
+    _validate_podcast_path(arxiv_id, length)
     mp3, _ = podcast.cache_paths(arxiv_id, length)
     if not mp3.exists():
         raise HTTPException(status_code=404, detail="podcast not generated")
     # FileResponse handles Range / 206 partial-content automatically.
-    return FileResponse(mp3, media_type="audio/mpeg",
-                        filename=f"{arxiv_id}-{length}.mp3")
+    # `inline` so <audio src=...> plays in-page instead of triggering a save.
+    return FileResponse(
+        mp3,
+        media_type="audio/mpeg",
+        filename=f"{arxiv_id}-{length}.mp3",
+        content_disposition_type="inline",
+    )
 
 
 @app.get("/api/podcast/{arxiv_id}/{length}.json")
 async def get_podcast_manifest(arxiv_id: str, length: str):
-    if length not in podcast.LENGTHS:
-        raise HTTPException(status_code=400, detail="invalid length")
+    _validate_podcast_path(arxiv_id, length)
     manifest = podcast.cached_manifest(arxiv_id, length)
     if manifest is None:
         raise HTTPException(status_code=404, detail="podcast not generated")
@@ -527,8 +543,7 @@ async def get_podcast_manifest(arxiv_id: str, length: str):
 
 @app.delete("/api/podcast/{arxiv_id}/{length}")
 async def delete_podcast(arxiv_id: str, length: str):
-    if length not in podcast.LENGTHS:
-        raise HTTPException(status_code=400, detail="invalid length")
+    _validate_podcast_path(arxiv_id, length)
     return {"removed": podcast.invalidate(arxiv_id, length)}
 
 
