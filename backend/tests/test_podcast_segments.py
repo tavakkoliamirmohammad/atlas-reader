@@ -94,8 +94,20 @@ def test_paren_open_after_period_splits():
 
 
 def test_quote_open_after_period_splits():
-    # Curly/straight quotes after a period.
+    # ASCII straight quotes after a period.
     result = split_sentences('They said no. "We disagree" came the reply.')
+    assert len(result) == 2
+
+
+def test_curly_double_quote_after_period_splits():
+    # LLM-generated scripts often contain Unicode left double quote (U+201C).
+    result = split_sentences("They concluded. “However,” she said.")
+    assert len(result) == 2
+
+
+def test_curly_single_quote_after_period_splits():
+    # Unicode left single quote (U+2018).
+    result = split_sentences("They concluded. ‘However’ was the word.")
     assert len(result) == 2
 
 
