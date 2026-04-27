@@ -186,4 +186,39 @@ describe("MiniAudioPlayer", () => {
     fireEvent.click(chevron);
     expect(chevron).toHaveAttribute("aria-expanded", "false");
   });
+
+  it("playback rate button cycles through 1x, 1.25x, 1.5x, 2x and back", () => {
+    localStorage.removeItem("atlas.podcast.rate.v1");
+    usePodcastStore.setState({
+      current: fakeCurrent,
+      generationState: "ready",
+      position: 0,
+      isPlaying: false,
+    });
+    render(<MiniAudioPlayer />);
+
+    const btn = screen.getByTestId("playback-rate");
+    expect(btn).toHaveTextContent("1×");
+
+    fireEvent.click(btn);
+    expect(btn).toHaveTextContent("1.25×");
+    fireEvent.click(btn);
+    expect(btn).toHaveTextContent("1.5×");
+    fireEvent.click(btn);
+    expect(btn).toHaveTextContent("2×");
+    fireEvent.click(btn);
+    expect(btn).toHaveTextContent("1×");
+  });
+
+  it("playback rate persists across remounts via localStorage", () => {
+    localStorage.setItem("atlas.podcast.rate.v1", "1.5");
+    usePodcastStore.setState({
+      current: fakeCurrent,
+      generationState: "ready",
+      position: 0,
+      isPlaying: false,
+    });
+    render(<MiniAudioPlayer />);
+    expect(screen.getByTestId("playback-rate")).toHaveTextContent("1.5×");
+  });
 });

@@ -17,6 +17,26 @@ function formatTime(seconds: number): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
+const PLAYBACK_RATES = [1, 1.25, 1.5, 2] as const;
+type PlaybackRate = (typeof PLAYBACK_RATES)[number];
+const RATE_STORAGE_KEY = "atlas.podcast.rate.v1";
+
+function loadStoredRate(): PlaybackRate {
+  try {
+    const raw = localStorage.getItem(RATE_STORAGE_KEY);
+    const n = raw === null ? NaN : Number(raw);
+    return (PLAYBACK_RATES as readonly number[]).includes(n) ? (n as PlaybackRate) : 1;
+  } catch {
+    return 1;
+  }
+}
+
+function formatRate(rate: PlaybackRate): string {
+  // 1.25 → "1.25×", 1 → "1×", 2 → "2×". Keep trailing zeros off integers.
+  const s = Number.isInteger(rate) ? rate.toString() : rate.toString();
+  return `${s}×`;
+}
+
 export function MiniAudioPlayer() {
   const current = usePodcastStore((s) => s.current);
   const generationState = usePodcastStore((s) => s.generationState);
@@ -31,6 +51,20 @@ export function MiniAudioPlayer() {
 
   const audioRef = useRef<HTMLAudioElement>(null);
   const [transcriptOpen, setTranscriptOpen] = useState(false);
+  const [playbackRate, setPlaybackRate] = useState<PlaybackRate>(loadStoredRate);
+
+  // Keep the audio element's playbackRate in sync with the picker. Done as
+  // an effect so the rate is reapplied across src changes (regenerate) and
+  // after the audio element first mounts.
+  useEffect(() => {
+    if (audioRef.current) audioRef.current.playbackRate = playbackRate;
+    try { localStorage.setItem(RATE_STORAGE_KEY, String(playbackRate)); } catch { /* noop */ }
+  }, [playbackRate, current?.url]);
+
+  function cyclePlaybackRate() {
+    const idx = PLAYBACK_RATES.indexOf(playbackRate);
+    setPlaybackRate(PLAYBACK_RATES[(idx + 1) % PLAYBACK_RATES.length]);
+  }
 
   // Sync audio src and rehydrate position when the URL changes.
   useEffect(() => {
@@ -306,6 +340,17 @@ export function MiniAudioPlayer() {
                 </span>
               </div>
             </div>
+
+            {/* Playback speed (cycles 1× → 1.25× → 1.5× → 2× → 1×). */}
+            <button
+              type="button"
+              onClick={cyclePlaybackRate}
+              aria-label={`Speed ${formatRate(playbackRate)}, click to cycle`}
+              data-testid="playback-rate"
+              className="shrink-0 px-2 h-7 rounded-md text-[11px] font-medium tabular-nums text-slate-300 hover:text-slate-100 hover:bg-white/10 transition-colors cursor-pointer"
+            >
+              {formatRate(playbackRate)}
+            </button>
 
             {/* Transcript toggle */}
             <button
