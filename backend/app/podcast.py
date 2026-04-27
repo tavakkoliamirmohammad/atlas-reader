@@ -43,7 +43,7 @@ from app.tts_client import (
 
 
 LENGTHS: Final[tuple[str, ...]] = ("short", "medium", "long")
-PROMPT_DIR = Path(__file__).parent / "prompts"
+PROMPT_DIR: Final = Path(__file__).parent / "prompts"
 DEFAULT_VOICE: Final = "af_bella"
 # Word-rate estimate used for progress reporting only -- not actual timing.
 WORDS_PER_SECOND_ESTIMATE: Final = 2.5  # ~150 wpm
@@ -68,11 +68,19 @@ def cache_paths(arxiv_id: str, length: str) -> tuple[Path, Path]:
 
 
 def cached_manifest(arxiv_id: str, length: str) -> dict | None:
-    """Return the JSON manifest dict if both mp3 and json files exist, else None."""
+    """Return the JSON manifest dict if both mp3 and json files exist, else None.
+
+    A corrupt or unreadable manifest is treated as a cache miss; the caller
+    will regenerate. This keeps generate()'s "all errors flow through SSE
+    events" contract intact (no JSONDecodeError escapes from this path).
+    """
     mp3, jsn = cache_paths(arxiv_id, length)
-    if mp3.exists() and jsn.exists():
+    if not (mp3.exists() and jsn.exists()):
+        return None
+    try:
         return json.loads(jsn.read_text())
-    return None
+    except (json.JSONDecodeError, OSError):
+        return None
 
 
 def invalidate(arxiv_id: str, length: str) -> bool:
@@ -90,16 +98,21 @@ def _url(arxiv_id: str, length: str) -> str:
     return f"/api/podcast/{arxiv_id}/{length}.mp3"
 
 
-class Event(TypedDict, total=False):
+class _EventBase(TypedDict):
     type: str
-    text: str
-    synthesized_s: float
-    total_s_estimate: float
-    url: str
-    segments: list[dict]
-    duration_s: float
-    phase: str
-    message: str
+
+
+class Event(_EventBase, total=False):
+    """SSE event payload. `type` is always present; the rest depend on `type`."""
+
+    text: str                # type=script_chunk
+    synthesized_s: float     # type=tts_progress
+    total_s_estimate: float  # type=tts_progress
+    url: str                 # type=ready
+    segments: list[dict]     # type=ready
+    duration_s: float        # type=ready
+    phase: str               # type=error
+    message: str             # type=error
 
 
 async def generate(
@@ -128,7 +141,7 @@ async def generate(
 
     # Fast path: cache hit before touching the lock.
     cached = cached_manifest(arxiv_id, length)
-    if cached:
+    if cached is not None:
         yield {
             "type": "ready",
             "url": _url(arxiv_id, length),
@@ -140,7 +153,7 @@ async def generate(
     async with _lock_for((arxiv_id, length)):
         # Re-check after acquiring -- another coroutine may have just finished.
         cached = cached_manifest(arxiv_id, length)
-        if cached:
+        if cached is not None:
             yield {
                 "type": "ready",
                 "url": _url(arxiv_id, length),
