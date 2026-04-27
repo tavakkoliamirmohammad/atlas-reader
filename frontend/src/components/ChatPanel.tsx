@@ -4,6 +4,8 @@ import { Trash2 } from "lucide-react";
 import {
   type ChatMessage,
   type CodexModelInfo,
+  type Paper,
+  api,
   clearConversation,
   fetchConversations,
   getCodexModels,
@@ -14,6 +16,7 @@ import { StreamingMessage } from "./StreamingMessage";
 import { QuickActionChips } from "./QuickActionChips";
 import { Glossary } from "./Glossary";
 import { useUiStore, type ModelChoice } from "@/stores/ui-store";
+import { usePodcastStore } from "@/stores/podcast-store";
 
 const CLAUDE_MODEL_META: Record<ModelChoice, { label: string; tag: string }> = {
   opus:   { label: "Opus",   tag: "deepest"  },
@@ -135,6 +138,20 @@ export function ChatPanel() {
   const codexModel = useUiStore((s) => s.codexModel);
   const setCodexModel = useUiStore((s) => s.setCodexModel);
   const backend = useUiStore((s) => s.backend);
+
+  const [tts_available, setTtsAvailable] = useState(true);
+  const [paperTitle, setPaperTitle] = useState<string>("");
+
+  // One-shot health check to detect whether the TTS sidecar is running.
+  useEffect(() => {
+    api.health().then((h) => setTtsAvailable(!!h.tts)).catch(() => {});
+  }, []);
+
+  // Fetch paper metadata so we can pass the title to the podcast store.
+  useEffect(() => {
+    if (!arxivId) return;
+    api.paper(arxivId).then((p: Paper) => setPaperTitle(p.title)).catch(() => {});
+  }, [arxivId]);
 
   // Discover codex models from `~/.codex/models_cache.json` via the backend.
   // Only fetched when codex is the active backend; the picker won't render
@@ -316,6 +333,17 @@ export function ChatPanel() {
     void send(prompt, displayLabel);
   }
 
+  function handleListen(length: "short" | "medium" | "long") {
+    if (!arxivId) return;
+    void usePodcastStore.getState().generate({
+      arxiv_id: arxivId,
+      length,
+      paperTitle: paperTitle || arxivId,
+      backend,
+      model: backend === "claude" ? model : codexModel,
+    });
+  }
+
   return (
     <div className="flex flex-col h-full">
       <Glossary arxivId={arxivId} />
@@ -343,6 +371,12 @@ export function ChatPanel() {
           disabled={streaming}
           summarizeElapsedMs={
             summarizeStartedAt !== null ? nowMs - summarizeStartedAt : null
+          }
+          onListen={handleListen}
+          listenDisabledReason={
+            !tts_available
+              ? "TTS service offline. Run `atlas up` to start it."
+              : undefined
           }
         />
       </div>

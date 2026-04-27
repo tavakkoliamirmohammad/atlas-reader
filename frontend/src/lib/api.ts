@@ -28,6 +28,7 @@ export type Backend = "claude" | "codex";
 
 export type HealthResponse = {
   ai: boolean;
+  tts?: boolean;
   backends?: { claude: boolean; codex: boolean };
   default_backend?: Backend;
   papers_today: number;

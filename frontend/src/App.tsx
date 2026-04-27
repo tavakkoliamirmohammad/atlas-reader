@@ -18,6 +18,8 @@ import { SearchPalette } from "./components/SearchPalette";
 import { Footer } from "./components/Footer";
 import { BuildProgressOverlay } from "./components/BuildProgressOverlay";
 import { BackendOfflineOverlay } from "./components/BackendOfflineOverlay";
+import { MiniAudioPlayer } from "./components/MiniAudioPlayer";
+import { usePodcastStore } from "./stores/podcast-store";
 import { u } from "./lib/api";
 
 export default function App() {
@@ -40,6 +42,10 @@ export default function App() {
   useEffect(() => {
     installKeyboard();
     installMotionAttribute();
+  }, []);
+
+  useEffect(() => {
+    void usePodcastStore.getState().rehydrate();
   }, []);
 
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
@@ -141,6 +147,7 @@ export default function App() {
         <SearchPalette open={searchOpen} onClose={() => setSearchOpen(false)} />
         <BuildProgressOverlay open={buildOpen} date={todayISO} onDone={() => setBuildOpen(false)} />
       </div>
+      <MiniAudioPlayer />
       <Footer />
       <BackendOfflineOverlay />
     </div>
