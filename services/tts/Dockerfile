@@ -26,6 +26,6 @@ COPY server.py ./
 
 EXPOSE 8767
 HEALTHCHECK --interval=10s --timeout=5s --retries=6 \
-    CMD python -c "import httpx,sys; sys.exit(0 if httpx.get('http://127.0.0.1:8767/health').status_code==200 else 1)"
+    CMD python -c "import httpx,sys; sys.exit(0 if httpx.get('http://127.0.0.1:8767/health', timeout=3).status_code==200 else 1)"
 
 CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8767"]

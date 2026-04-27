@@ -36,15 +36,10 @@ services:
     image: atlas-tts:local
     container_name: atlas-tts
     # No `ports:` — internal-only. Reached by sibling containers as `tts:8767`.
-    volumes:
-      - tts-model-cache:/root/.cache/huggingface
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "python", "-c", "import httpx,sys; sys.exit(0 if httpx.get('http://127.0.0.1:8767/health').status_code==200 else 1)"]
+      test: ["CMD", "python", "-c", "import httpx,sys; sys.exit(0 if httpx.get('http://127.0.0.1:8767/health', timeout=3).status_code==200 else 1)"]
       interval: 10s
       timeout: 5s
       retries: 6
-      start_period: 30s
-
-volumes:
-  tts-model-cache:
+      start_period: 15s
