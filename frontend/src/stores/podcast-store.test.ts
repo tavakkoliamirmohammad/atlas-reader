@@ -205,6 +205,12 @@ describe("podcast-store setPosition", () => {
 
     expect(usePodcastStore.getState().position).toBe(42.5);
 
+    // setPosition is debounced (~1s) to avoid hammering localStorage from
+    // <audio>'s ~4Hz timeupdate event. Wait for the flush.
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 1100));
+    });
+
     const stored = JSON.parse(localStorage.getItem("atlas.podcast.session.v1") ?? "{}");
     expect(stored.position).toBe(42.5);
     expect(stored.arxiv_id).toBe("p1");

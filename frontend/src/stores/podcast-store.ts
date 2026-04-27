@@ -27,6 +27,10 @@ export type CurrentPodcast = {
   duration_s: number;
   voice: string;
   model: string;
+  // Inputs to the original generate() call, kept so regenerate() can re-run
+  // with the same backend/model the user originally chose.
+  origBackend: string | undefined;
+  origModel: string | undefined;
 };
 
 type PodcastState = {
@@ -53,6 +57,33 @@ type PodcastState = {
 };
 
 const STORAGE_KEY = "atlas.podcast.session.v1";
+const POSITION_PERSIST_INTERVAL_MS = 1000;
+
+// Monotonic counter incremented at the top of every generate(); late async
+// callbacks (notably the manifest fetch after a `ready` event) compare against
+// the token value they captured to detect closed/superseded sessions.
+let _currentGenerationToken = 0;
+
+let _positionFlushTimer: ReturnType<typeof setTimeout> | null = null;
+let _pendingPosition: number | null = null;
+
+function schedulePersistPosition(s: number) {
+  _pendingPosition = s;
+  if (_positionFlushTimer !== null) return;
+  _positionFlushTimer = setTimeout(() => {
+    _positionFlushTimer = null;
+    if (_pendingPosition === null) return;
+    const cur = usePodcastStore.getState().current;
+    if (!cur) return;
+    savePersisted({
+      arxiv_id: cur.arxiv_id,
+      length: cur.length,
+      paperTitle: cur.paperTitle,
+      position: _pendingPosition,
+    });
+    _pendingPosition = null;
+  }, POSITION_PERSIST_INTERVAL_MS);
+}
 
 type Persisted = {
   arxiv_id: string;
@@ -90,6 +121,12 @@ export const usePodcastStore = create<PodcastState>((set, get) => ({
   isPlaying: false,
 
   async generate({ arxiv_id, length, paperTitle, backend, model }) {
+    // Track this generation's identity so late async callbacks (notably the
+    // fire-and-forget fetchManifest after a `ready` event) can detect when
+    // the user has closed the player or started a new generation, and skip
+    // their state writes instead of resurrecting a closed session.
+    const generationToken = ++_currentGenerationToken;
+
     set({
       generationState: "scripting",
       scriptDraft: "",
@@ -105,48 +142,44 @@ export const usePodcastStore = create<PodcastState>((set, get) => ({
     await streamGenerate(req, {
       onEvent: (ev: PodcastEvent) => {
         if (ev.type === "script_chunk") {
-          set((s) => ({
-            scriptDraft: s.scriptDraft + ev.text,
-            generationState:
-              s.generationState === "scripting" ? "scripting" : s.generationState,
-          }));
+          set((s) => {
+            // Drop any chunks that arrive after we've left the scripting phase
+            // (e.g. an error event flipped state to "error" before the next
+            // chunk landed). Without this guard the partial transcript keeps
+            // growing while the UI is in an error state — visually confusing.
+            if (s.generationState !== "scripting") return s;
+            return { scriptDraft: s.scriptDraft + ev.text };
+          });
         } else if (ev.type === "tts_progress") {
           set({
             generationState: "synthesizing",
             progress: { synthesized_s: ev.synthesized_s, total_s_estimate: ev.total_s_estimate },
           });
         } else if (ev.type === "ready") {
-          // We have the URL + segments but the manifest's voice/model live in
-          // the JSON sibling. Fetch it for the player UI label.
           const url = ev.url;
           const readySegments = ev.segments;
           const readyDuration = ev.duration_s;
-          fetchManifest(arxiv_id, length).then((m) => {
+          // Manifest's voice/model live in the JSON sibling. Fire-and-forget
+          // fetch — the guard below skips state writes if the user closed the
+          // player while the request was in-flight.
+          const finalize = (voice: string, modelLabel: string) => {
+            if (generationToken !== _currentGenerationToken) return;
             set({
               current: {
                 arxiv_id, length, paperTitle, url,
                 segments: readySegments,
                 duration_s: readyDuration,
-                voice: m?.voice ?? "",
-                model: m?.model ?? "",
+                voice, model: modelLabel,
+                origBackend: backend,
+                origModel: model,
               },
               generationState: "ready",
             });
             savePersisted({ arxiv_id, length, paperTitle, position: 0 });
-          }).catch(() => {
-            // Manifest fetch failed (rare race) — still set current with empty meta.
-            set({
-              current: {
-                arxiv_id, length, paperTitle, url,
-                segments: readySegments,
-                duration_s: readyDuration,
-                voice: "",
-                model: "",
-              },
-              generationState: "ready",
-            });
-            savePersisted({ arxiv_id, length, paperTitle, position: 0 });
-          });
+          };
+          fetchManifest(arxiv_id, length)
+            .then((m) => finalize(m?.voice ?? "", m?.model ?? ""))
+            .catch(() => finalize("", ""));
         } else if (ev.type === "error") {
           set({
             generationState: "error",
@@ -166,25 +199,33 @@ export const usePodcastStore = create<PodcastState>((set, get) => ({
   async regenerate() {
     const cur = get().current;
     if (!cur) return;
-    await deletePodcast(cur.arxiv_id, cur.length).catch(() => {});
+    try {
+      await deletePodcast(cur.arxiv_id, cur.length);
+    } catch (err) {
+      // If the cache delete fails, the next generate() call will see the
+      // stale cached file and return the OLD podcast — silently. Surface
+      // the error instead of pretending the regenerate succeeded.
+      set({
+        generationState: "error",
+        error: { phase: "delete", message: err instanceof Error ? err.message : String(err) },
+      });
+      return;
+    }
     await get().generate({
       arxiv_id: cur.arxiv_id,
       length: cur.length,
       paperTitle: cur.paperTitle,
+      backend: cur.origBackend,
+      model: cur.origModel,
     });
   },
 
   setPosition(s) {
     set({ position: s });
-    const cur = get().current;
-    if (cur) {
-      savePersisted({
-        arxiv_id: cur.arxiv_id,
-        length: cur.length,
-        paperTitle: cur.paperTitle,
-        position: s,
-      });
-    }
+    // Persist position at most once per second; <audio>'s timeupdate fires
+    // ~4x/s during playback, which is more localStorage churn than the
+    // session-recovery use case needs (precision required = seconds).
+    schedulePersistPosition(s);
   },
 
   setPlaying(b) { set({ isPlaying: b }); },
@@ -226,6 +267,10 @@ export const usePodcastStore = create<PodcastState>((set, get) => ({
         duration_s: manifest.duration_s,
         voice: manifest.voice,
         model: manifest.model,
+        // Rehydrated sessions don't know the user's original backend/model
+        // overrides; regenerate() will use the current defaults.
+        origBackend: undefined,
+        origModel: undefined,
       },
       generationState: "ready",
       position: p.position,

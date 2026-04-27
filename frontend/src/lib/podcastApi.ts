@@ -65,36 +65,45 @@ export async function streamGenerate(
   let buffer = "";
   let doneEmitted = false;
 
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    let idx: number;
-    while ((idx = buffer.indexOf("\n\n")) !== -1) {
-      const raw = buffer.slice(0, idx);
-      buffer = buffer.slice(idx + 2);
-      if (!raw) continue;
-      const ev = parseFrame(raw);
-      if (ev.event === "done") {
-        doneEmitted = true;
-        handlers.onDone?.();
-        continue;
-      }
-      if (ev.event === "error") {
-        handlers.onError?.(ev.data || "stream error");
-        continue;
-      }
-      try {
-        const payload = JSON.parse(ev.data) as PodcastEvent;
-        handlers.onEvent(payload);
-      } catch {
-        // Malformed JSON — surface as error but keep reading; backend should
-        // never emit this, but defensive parsing keeps the stream resilient.
-        handlers.onError?.(`bad event: ${ev.data}`);
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let idx: number;
+      while ((idx = buffer.indexOf("\n\n")) !== -1) {
+        const raw = buffer.slice(0, idx);
+        buffer = buffer.slice(idx + 2);
+        if (!raw) continue;
+        const ev = parseFrame(raw);
+        if (ev.event === "done") {
+          doneEmitted = true;
+          handlers.onDone?.();
+          continue;
+        }
+        if (ev.event === "error") {
+          handlers.onError?.(ev.data || "stream error");
+          continue;
+        }
+        try {
+          const payload = JSON.parse(ev.data) as PodcastEvent;
+          handlers.onEvent(payload);
+        } catch {
+          // Malformed JSON — surface as error but keep reading; backend should
+          // never emit this, but defensive parsing keeps the stream resilient.
+          handlers.onError?.(`bad event: ${ev.data}`);
+        }
       }
     }
+    if (!doneEmitted) handlers.onDone?.();
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") return;
+    throw err;
+  } finally {
+    // Release the body's lock so future fetches against the same response
+    // don't fail with "ReadableStream is locked." cancel() is idempotent.
+    reader.cancel().catch(() => {});
   }
-  if (!doneEmitted) handlers.onDone?.();
 }
 
 function parseFrame(raw: string): { event: string; data: string } {
