@@ -91,6 +91,33 @@ def cached_manifest(arxiv_id: str, length: str) -> dict | None:
         return None
 
 
+_SCRIPT_OPEN: Final = "<script>"
+_SCRIPT_CLOSE: Final = "</script>"
+
+
+def _strip_preamble(raw: str) -> str:
+    """Extract the script body from `<script>...</script>` tags.
+
+    The prompt instructs the model to wrap the entire script in these tags,
+    keeping any tool-use narration ("I'm going to read the PDF...") and
+    closing chatter ("hope you enjoyed!") outside them. The post-processor:
+
+      1. If both tags are present, return only what's between them.
+      2. If only the open tag is present (model forgot to close), return
+         everything after the open tag.
+      3. If neither tag is present, return the raw text — the script will
+         be noisier but still playable.
+    """
+    open_idx = raw.find(_SCRIPT_OPEN)
+    if open_idx == -1:
+        return raw
+    body_start = open_idx + len(_SCRIPT_OPEN)
+    close_idx = raw.find(_SCRIPT_CLOSE, body_start)
+    if close_idx == -1:
+        return raw[body_start:].strip()
+    return raw[body_start:close_idx].strip()
+
+
 def invalidate(arxiv_id: str, length: str) -> bool:
     """Remove both cache files. Returns True if at least one file was removed."""
     mp3, jsn = cache_paths(arxiv_id, length)
@@ -210,10 +237,17 @@ async def _generate_locked(
             script_parts.append(chunk)
             yield {"type": "script_chunk", "text": chunk}
 
-        script = "".join(script_parts).strip()
-        if not script:
+        raw_script = "".join(script_parts).strip()
+        if not raw_script:
             yield {"type": "error", "phase": "script", "message": "empty script"}
             return
+
+        # The prompt instructs the model to emit a sentinel before the script
+        # so we can strip its tool-use narration ("I'm going to read the PDF...",
+        # "I'm pulling the evaluation details now..."). If the sentinel is
+        # missing we fall back to using the raw output — the script will be
+        # noisier but still playable.
+        script = _strip_preamble(raw_script)
 
         sentences = split_sentences(script)
         if not sentences:

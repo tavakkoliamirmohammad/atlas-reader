@@ -384,3 +384,36 @@ def test_invalidate_removes_both_files(monkeypatch, tmp_path):
 
     # Second call: nothing to remove
     assert podcast.invalidate("2401.00001", "long") is False
+
+
+def test_strip_preamble_extracts_between_tags():
+    raw = (
+        "I'm going to read the PDF and write the script.\n"
+        "Pulling the evaluation now.\n"
+        "<script>\n"
+        "If you've ever planned a huge model run from a handful of smaller runs, "
+        "this paper is about the awkward part.\n"
+        "</script>\n"
+        "Hope you enjoyed it!"
+    )
+    out = podcast._strip_preamble(raw)
+    assert out.startswith("If you've ever planned")
+    assert "going to read" not in out
+    assert "Hope you enjoyed" not in out
+
+
+def test_strip_preamble_returns_raw_when_no_tags():
+    raw = "If you've ever planned a huge model run, this paper is about that."
+    assert podcast._strip_preamble(raw) == raw
+
+
+def test_strip_preamble_handles_open_tag_only():
+    """Model forgot to close — keep everything after the open tag."""
+    raw = "<script>\nFirst sentence of the script."
+    assert podcast._strip_preamble(raw) == "First sentence of the script."
+
+
+def test_strip_preamble_handles_inline_tags():
+    """Tags don't have to be on their own lines; the matching is positional."""
+    raw = "preamble <script>just the script</script> trailing"
+    assert podcast._strip_preamble(raw) == "just the script"

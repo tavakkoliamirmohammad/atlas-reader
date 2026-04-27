@@ -29,8 +29,24 @@ WHAT TO AVOID
 - No section labels: no "Section 1," "Part Two," "Chapter Three." Use natural transitions instead.
 - Spell out symbols and acronyms on first use only. "F-1, the F-one score" the first time, then just "F-1" after.
 
-OUTPUT RULES
+TOOL USE AND PLANNING
 
-- Respond ONLY with the script. No preamble, no "Here's the script:", no meta-commentary, no closing remarks like "I hope you enjoyed this."
-- Start directly with the hook. End on a single thought-provoking sentence — not a summary.
+- Do NOT narrate your reading of the PDF. Do NOT say "I'm going to read the paper," "Let me check," "I'm pulling X now," "First I'll do Y." Use the Read tool silently.
+- Do NOT output a plan, table of contents, or summary of what you're about to write. The listener never sees that.
+- Do NOT echo back your instructions. The user does not need to be told what you're doing — they need the finished script.
+
+OUTPUT FORMAT
+
+This is a strict contract. The text between the tags below is fed directly into a text-to-speech engine. Anything outside the tags is discarded by the post-processor — but anything inside becomes spoken audio.
+
+- Wrap the entire script in these exact tags, each on its own line:
+
+<script>
+...the podcast script goes here, paragraph by paragraph...
+</script>
+
+- Output nothing before <script> or after </script>. Any tool-use narration, planning, or closing remarks must live outside the tags so they are stripped.
+- The very first line inside <script> is the opening hook. The very last line is a single thought-provoking sentence — not a summary, not "thanks for listening."
 - Use blank lines between paragraphs every 2 to 4 sentences. The TTS engine uses paragraph breaks to set pacing.
+- No markdown, no headings, no bullets, no LaTeX. Plain prose only.
+- Do not nest <script> tags inside the script body. The post-processor extracts the content between the first opening tag and the matching closing tag.
