@@ -16,7 +16,7 @@ from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app import (
     ai_argv,
@@ -33,6 +33,7 @@ from app import (
     imports,
     papers,
     pdf_cache,
+    podcast,
     search,
     stats,
     summarizer,
@@ -391,6 +392,13 @@ class AskBody(BaseModel):
     display: str | None = None
 
 
+class PodcastBody(BaseModel):
+    arxiv_id: str = Field(min_length=1, max_length=128)
+    length: str = Field(pattern="^(short|medium|long)$")
+    backend: str | None = None
+    model: str | None = None
+
+
 def _sse_format(chunk: str) -> bytes:
     """Serialize a streaming text chunk as a single SSE event.
 
@@ -403,6 +411,15 @@ def _sse_format(chunk: str) -> bytes:
     """
     payload = json.dumps({"t": chunk}, ensure_ascii=False)
     return f"data: {payload}\n\n".encode("utf-8")
+
+
+def _sse_event(payload: dict) -> bytes:
+    """Serialize a structured event dict as a single SSE 'data:' line.
+
+    Used by /api/podcast where each event already has a type discriminator and
+    multiple fields (unlike summarize/ask which yield raw text chunks).
+    """
+    return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n".encode("utf-8")
 
 
 @app.post("/api/summarize/{arxiv_id}")
@@ -459,6 +476,60 @@ async def post_ask(
             yield f"event: error\ndata: {err_payload}\n\n".encode("utf-8")
 
     return StreamingResponse(gen(), media_type="text/event-stream")
+
+
+@app.post("/api/podcast")
+async def post_podcast(body: PodcastBody):
+    """Generate (or replay) a podcast for a paper. Streams SSE events."""
+    chosen_backend = ai_backend.normalize_backend(body.backend)
+    chosen_model = body.model or None
+
+    async def gen():
+        try:
+            async for ev in podcast.generate(
+                body.arxiv_id, body.length,
+                backend=chosen_backend, model=chosen_model,
+            ):
+                yield _sse_event(ev)
+            yield b"event: done\ndata: ok\n\n"
+        except KeyError:
+            yield _sse_event({"type": "error", "phase": "input",
+                              "message": f"unknown paper: {body.arxiv_id}"})
+        except ValueError as exc:
+            yield _sse_event({"type": "error", "phase": "input", "message": str(exc)})
+        except Exception as exc:  # noqa: BLE001 — surface unexpected failures as SSE
+            yield _sse_event({"type": "error", "phase": "internal", "message": str(exc)})
+
+    return StreamingResponse(gen(), media_type="text/event-stream")
+
+
+@app.get("/api/podcast/{arxiv_id}/{length}.mp3")
+async def get_podcast_mp3(arxiv_id: str, length: str):
+    if length not in podcast.LENGTHS:
+        raise HTTPException(status_code=400, detail="invalid length")
+    mp3, _ = podcast.cache_paths(arxiv_id, length)
+    if not mp3.exists():
+        raise HTTPException(status_code=404, detail="podcast not generated")
+    # FileResponse handles Range / 206 partial-content automatically.
+    return FileResponse(mp3, media_type="audio/mpeg",
+                        filename=f"{arxiv_id}-{length}.mp3")
+
+
+@app.get("/api/podcast/{arxiv_id}/{length}.json")
+async def get_podcast_manifest(arxiv_id: str, length: str):
+    if length not in podcast.LENGTHS:
+        raise HTTPException(status_code=400, detail="invalid length")
+    manifest = podcast.cached_manifest(arxiv_id, length)
+    if manifest is None:
+        raise HTTPException(status_code=404, detail="podcast not generated")
+    return manifest
+
+
+@app.delete("/api/podcast/{arxiv_id}/{length}")
+async def delete_podcast(arxiv_id: str, length: str):
+    if length not in podcast.LENGTHS:
+        raise HTTPException(status_code=400, detail="invalid length")
+    return {"removed": podcast.invalidate(arxiv_id, length)}
 
 
 @app.get("/api/conversations/{arxiv_id}")
