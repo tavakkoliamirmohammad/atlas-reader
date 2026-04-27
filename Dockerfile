@@ -15,6 +15,11 @@ RUN pnpm build
 FROM python:3.12-slim AS runtime
 WORKDIR /app
 
+# ffmpeg is used by the podcast orchestrator to concat per-sentence WAVs
+# into a single MP3 deliverable.
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     ATLAS_DATA_DIR=/data
