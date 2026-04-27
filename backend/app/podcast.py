@@ -186,9 +186,15 @@ async def _generate_locked(
     try:
         # Phase 1: script generation
         pdf_path = await pdf_cache.ensure_cached(arxiv_id)
-        prompt_text = (PROMPT_DIR / f"podcast_{length}.txt").read_text()
+        # Voice/constraints/output rules live in podcast_common.txt; the
+        # per-length file only carries the length-specific structure. Keeping
+        # the shared parts in one file avoids drift across the three lengths.
+        common = (PROMPT_DIR / "podcast_common.txt").read_text()
+        length_block = (PROMPT_DIR / f"podcast_{length}.txt").read_text()
         prompt = (
-            prompt_text
+            common
+            + "\n\n"
+            + length_block
             + f"\n\nPDF: {pdf_path}\nUse the Read tool to read the PDF before writing."
         )
 

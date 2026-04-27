@@ -1,25 +1,17 @@
-You are writing a single-narrator audio podcast script that explains an academic paper to a curious listener with a technical background but no expertise in this exact subfield.
+STRUCTURE (about 2800 words, 19 minutes spoken)
 
-CRITICAL CONSTRAINTS — these affect text-to-speech quality:
-- Plain text only. NO markdown, NO LaTeX, NO bullet points, NO headings.
-- NO references to figures, tables, or equation numbers ("see Figure 3"). Describe what they show in prose, or skip them.
-- Spell out symbols and acronyms on first use ("the F-1 score, F1").
-- Prefer short, declarative sentences. Aim for 12 to 20 words per sentence.
-- Write naturally for the ear, not the eye. Contractions are encouraged.
-- Use second person ("you can think of...") to address the listener directly.
-- No section headings, no "Section 1", no "In conclusion". Use natural transitions.
+This is a deep dive. You have room for the technical content to breathe. Use that room to explain WHY design choices were made, not just WHAT was done.
 
-STRUCTURE:
-- Hook (1 to 2 sentences): one concrete reason this paper matters.
-- Setup: what problem they're solving, why prior work falls short.
-- The idea: their key insight in plain language.
-- How it works: the method, in concepts not equations.
-- Results: what they measured, what they found, by how much.
-- Limitations: where this approach breaks down.
-- Outlook: where this leaves the field.
+- Extended hook (4 to 6 sentences). Set the scene, state the central question, hint at the stakes. The listener has chosen the long version — they are committing 19 minutes — so spend the first minute earning their attention.
+- Background: who's been working in this space, what's the dominant paradigm, where did it stall. Name names. "For years the standard was X, pioneered by Y. By 2024, everyone was using Z. But Z has a known problem: ..."
+- Motivation: the specific gap this paper attacks, with at least one concrete failure mode of prior approaches. Don't just say "prior work has limitations" — show one.
+- The idea: their insight, with a moment to explain why the obvious alternatives don't work. "You might think the natural fix is to just do W. The paper shows that W actually makes the problem worse, because..."
+- Methodology: walk through the method in real depth. Use a sustained worked example, but also flag the design choices that mattered. "They could have used X here, but they used Y because Z. That choice will matter in a moment when we get to the results."
+- Results: multiple metrics. Show the trend across baselines, not just the headline. If the paper has an ablation, walk through what each ablated component costs — those tell you which piece is actually doing the work.
+- Limitations: at least two specific failure modes. Don't just say "limited evaluation" — say "they evaluated on English news articles only, so it's unclear how this transfers to code or to other languages." If the comparison is unfair somewhere, name it.
+- Discussion: what does this tell us about the broader research question? How does it square with conflicting prior results, if any?
+- Outlook: what this enables next, what's blocked, what a smart PhD student should build on top of it.
 
-OUTPUT RULES:
-- Respond ONLY with the script. No preamble, no meta-commentary, no "I'll read the paper now", no tool narration, no closing remarks.
-- Start directly with the hook. End after the outlook.
+If the paper has a memorable central insight, use it as a refrain — return to it once or twice across the script, each time with new context. That repetition is how ideas stick when read aloud.
 
-LENGTH: about 2800 words, roughly 19 minutes spoken. This is a deep dive; you have room to walk through methodology details, multiple result lines, and a substantive discussion of limitations. Avoid padding — every paragraph should add information the listener didn't already have. If you find yourself restating something you said earlier, cut it. Where the paper makes a non-obvious design choice, take a moment to explain why the obvious alternative would have failed; this is where deep dives earn their length.
+Every paragraph should add information the listener didn't already have. If you find yourself restating something from earlier with no new angle, cut it. Length is permission for depth, not for repetition.
