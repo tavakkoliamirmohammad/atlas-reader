@@ -37,6 +37,7 @@ from app import (
     search,
     stats,
     summarizer,
+    tts_client,
 )
 from fastapi import UploadFile, File, Form
 
@@ -134,6 +135,23 @@ app.add_middleware(
 )
 
 
+# TTS availability is probed at most once every TTS_HEALTH_TTL_S. The probe
+# itself is cheap (one HTTP GET) but every browser tab polls /api/health every
+# few seconds, so caching avoids piling up requests against the sidecar.
+_TTS_HEALTH_TTL_S = 5.0
+_tts_health_cache: tuple[float, bool] = (0.0, False)
+
+
+async def _tts_available() -> bool:
+    global _tts_health_cache
+    now = _time.monotonic()
+    if now - _tts_health_cache[0] < _TTS_HEALTH_TTL_S:
+        return _tts_health_cache[1]
+    ok = await tts_client.health_ok()
+    _tts_health_cache = (now, ok)
+    return ok
+
+
 @app.get("/api/health")
 async def get_health() -> dict:
     backends = await ai_backend.available_backends()
@@ -143,6 +161,7 @@ async def get_health() -> dict:
         "ai": backends["claude"] or backends["codex"],
         "backends": backends,
         "default_backend": ai_backend.DEFAULT_BACKEND,
+        "tts": await _tts_available(),
         "papers_today": len(papers.list_recent(days=1)),
     }
 

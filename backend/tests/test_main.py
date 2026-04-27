@@ -43,6 +43,53 @@ async def test_health_endpoint_when_no_backend_available(atlas_data_dir):
 
 
 @pytest.mark.asyncio
+async def test_health_endpoint_reports_tts_when_available(atlas_data_dir):
+    db.init()
+    # Force a fresh probe (cache from a previous test could short-circuit).
+    import app.main as main_mod
+    main_mod._tts_health_cache = (0.0, False)
+    with patch(
+        "app.main.ai_backend.available_backends",
+        new=AsyncMock(return_value={"claude": True, "codex": False}),
+    ), patch("app.main.tts_client.health_ok", new=AsyncMock(return_value=True)):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            r = await c.get("/api/health")
+    assert r.json()["tts"] is True
+
+
+@pytest.mark.asyncio
+async def test_health_endpoint_reports_tts_when_unavailable(atlas_data_dir):
+    db.init()
+    import app.main as main_mod
+    main_mod._tts_health_cache = (0.0, False)
+    with patch(
+        "app.main.ai_backend.available_backends",
+        new=AsyncMock(return_value={"claude": False, "codex": False}),
+    ), patch("app.main.tts_client.health_ok", new=AsyncMock(return_value=False)):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            r = await c.get("/api/health")
+    assert r.json()["tts"] is False
+
+
+@pytest.mark.asyncio
+async def test_health_endpoint_caches_tts_probe(atlas_data_dir):
+    """Within the TTL window, repeated /api/health calls should hit health_ok once."""
+    db.init()
+    import app.main as main_mod
+    main_mod._tts_health_cache = (0.0, False)
+    probe = AsyncMock(return_value=True)
+    with patch(
+        "app.main.ai_backend.available_backends",
+        new=AsyncMock(return_value={"claude": True, "codex": True}),
+    ), patch("app.main.tts_client.health_ok", probe):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            await c.get("/api/health")
+            await c.get("/api/health")
+            await c.get("/api/health")
+    assert probe.call_count == 1  # cached after first call
+
+
+@pytest.mark.asyncio
 async def test_digest_endpoint_triggers_build_and_returns_papers(atlas_data_dir):
     db.init()
     sample = [Paper("1", "T", "A", "x", "cs.PL", "2026-04-19T08:00:00Z")]
