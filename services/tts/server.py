@@ -1,5 +1,7 @@
 from __future__ import annotations
+
 import io
+import threading
 from typing import Final
 
 import numpy as np
@@ -15,6 +17,10 @@ MAX_CHARS: Final = 5_000
 
 app = FastAPI()
 _pipeline = KPipeline(lang_code="a")  # 'a' = American English
+
+# KPipeline holds mutable internal state across calls; serialize access so
+# concurrent /synthesize requests can't interleave generator iterations.
+_pipeline_lock = threading.Lock()
 
 
 class SynthRequest(BaseModel):
@@ -32,7 +38,8 @@ def synthesize(req: SynthRequest) -> Response:
     try:
         # KPipeline yields (graphemes, phonemes, audio_ndarray) per chunk.
         # audio is already a numpy float32 array at 24 kHz — no .numpy() needed.
-        chunks = [audio for _, _, audio in _pipeline(req.text, voice=req.voice)]
+        with _pipeline_lock:
+            chunks = [audio for _, _, audio in _pipeline(req.text, voice=req.voice)]
     except Exception as e:  # noqa: BLE001 — surface upstream error to caller
         raise HTTPException(500, f"synthesis failed: {e!s}") from e
     if not chunks:
