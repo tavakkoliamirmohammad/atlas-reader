@@ -12,12 +12,6 @@ vi.mock("@/lib/api", () => ({
     paper: vi.fn(),
     pdfUrl: (id: string) => `/api/pdf/${id}`,
   },
-  refreshDigest: vi.fn(async () => ({
-    date: "2026-04-22",
-    new: 0,
-    total_papers: 0,
-    duration_ms: 1,
-  })),
 }));
 
 describe("PaperList range selector", () => {

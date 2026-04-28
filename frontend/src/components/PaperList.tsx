@@ -1,11 +1,12 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ChevronDown, ChevronRight, RefreshCcw } from "lucide-react";
-import { api, refreshDigest, type Paper } from "@/lib/api";
+import { api, type DigestFailure, type Paper } from "@/lib/api";
 import { groupPapersByDay } from "@/lib/group-by-day";
 import { useUiStore, type DigestRange } from "@/stores/ui-store";
 import { UrlBar } from "./UrlBar";
 import { PaperRow } from "./PaperRow";
+import { CategoryPicker } from "./CategoryPicker";
 
 const RANGE_OPTIONS: { value: DigestRange; label: string }[] = [
   { value: 3,     label: "3d" },
@@ -35,11 +36,30 @@ function computeAllCounts(papers: Paper[]): RangeCounts {
   return out;
 }
 
+type FetchOutcome =
+  | { kind: "ok" }
+  | { kind: "rate_limited" }
+  | { kind: "unreachable" }
+  | { kind: "error"; detail: string };
+
+function summarizeFailures(failures: DigestFailure[] | undefined, papers: number): FetchOutcome {
+  if (!failures || failures.length === 0 || papers > 0) return { kind: "ok" };
+  // If at least one category was rate-limited, that's almost always the
+  // root cause for the others too — surface the most informative banner.
+  if (failures.some((f) => f.kind === "rate_limited")) return { kind: "rate_limited" };
+  if (failures.some((f) => f.kind === "unreachable")) return { kind: "unreachable" };
+  return { kind: "error", detail: failures[0].kind };
+}
+
 export function PaperList() {
   const [papers, setPapers] = useState<Paper[]>([]);
+  const [outcome, setOutcome] = useState<FetchOutcome>({ kind: "ok" });
+  // `loading` = "we have nothing to show yet, please wait" (full overlay).
+  // `fetching` = "a refetch is in flight; existing list stays visible
+  // with a small inline indicator instead of a blocking spinner."
   const [loading, setLoading] = useState(true);
+  const [fetching, setFetching] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
-  const [rangeCounts, setRangeCounts] = useState<RangeCounts | null>(null);
   const [filter, setFilter] = useState("");
   // Increments each successful manual refresh to re-trigger the list-fetch
   // effect below (same pattern used elsewhere in the app for ephemeral
@@ -79,6 +99,8 @@ export function PaperList() {
   const [ink, setInk] = useState<{ left: number; width: number } | null>(null);
   const digestRange = useUiStore((s) => s.digestRange);
   const setDigestRange = useUiStore((s) => s.setDigestRange);
+  const digestCategories = useUiStore((s) => s.digestCategories);
+  const setDigestCategories = useUiStore((s) => s.setDigestCategories);
 
   // Reset filter when the user switches range so "no results" in 3d doesn't
   // silently hide all 30d papers too.
@@ -88,32 +110,45 @@ export function PaperList() {
     setSelectedDay(null);
   }, [digestRange]);
 
+  // Live arXiv fetch per page load and per manual refresh. Re-runs when
+  // the category set changes — debounced 300 ms so rapid toggling in the
+  // picker fires one request, not one per click. When the user clears
+  // every category, we short-circuit to an empty list with a hint, since
+  // arXiv has nothing to fetch by definition.
   useEffect(() => {
+    if (digestCategories.length === 0) {
+      setPapers([]);
+      setOutcome({ kind: "ok" });
+      setLoading(false);
+      setFetching(false);
+      return;
+    }
     let cancelled = false;
-    setLoading(true);
-    // Clear the previous range's papers immediately so the user never sees a
-    // stale list during the switch — otherwise picking 3d after 7d keeps the
-    // 7d rows visible until the new fetch lands, which reads as "filter broken".
-    setPapers([]);
-    (async () => {
+    // Show the full overlay only on first load. On subsequent refetches the
+    // existing list stays visible; a small "Updating…" pill tells the user
+    // a request is in flight without blocking interaction.
+    setFetching(true);
+    if (papers.length === 0) setLoading(true);
+    const t = window.setTimeout(async () => {
       try {
-        const res = await api.digest(false, digestRange);
-        if (!cancelled) {
-          setPapers(res.papers);
-          // If the user is on "all", we already have what we need to compute
-          // all-segment counts — skip the extra background fetch.
-          if (digestRange === "all") {
-            setRangeCounts(computeAllCounts(res.papers));
-          }
-        }
-      } catch {
-        if (!cancelled) setPapers([]);
+        const res = await api.digest(digestCategories);
+        if (cancelled) return;
+        setPapers(res.papers);
+        setOutcome(summarizeFailures(res.failures, res.papers.length));
+      } catch (e) {
+        if (cancelled) return;
+        setPapers([]);
+        setOutcome({ kind: "error", detail: (e as Error).message });
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+          setFetching(false);
+        }
       }
-    })();
-    return () => { cancelled = true; };
-  }, [digestRange, refreshTick]);
+    }, 120);
+    return () => { cancelled = true; window.clearTimeout(t); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshTick, digestCategories]);
 
   // Clear any pending "refresh info" flash on unmount so the timer doesn't
   // fire after the component is gone.
@@ -139,17 +174,28 @@ export function PaperList() {
   async function onRefresh() {
     if (refreshing) return;
     setRefreshing(true);
+    const before = papers.length;
     try {
-      const r = await refreshDigest();
-      // Re-fetch the list + all-range counts so the UI reflects any newly
-      // landed papers without waiting for the user to switch ranges.
-      setRangeCounts(null);
+      // `fresh=true` bypasses the backend's per-category TTL cache so the
+      // user actually sees the latest arXiv state when they hit the
+      // refresh button (otherwise we'd hand them the cached snapshot).
+      const res = await api.digest(digestCategories, true);
+      const delta = res.papers.length - before;
+      setPapers(res.papers);
+      const o = summarizeFailures(res.failures, res.papers.length);
+      setOutcome(o);
       setRefreshTick((t) => t + 1);
-      flashRefreshInfo(
-        r.new > 0
-          ? `${r.new} new paper${r.new === 1 ? "" : "s"}`
-          : "Already up to date",
-      );
+      if (o.kind === "rate_limited") {
+        flashRefreshInfo("arXiv is rate-limiting us — try again in a few minutes");
+      } else if (o.kind === "unreachable") {
+        flashRefreshInfo("Couldn't reach arXiv — check your connection");
+      } else {
+        flashRefreshInfo(
+          delta > 0
+            ? `${delta} new paper${delta === 1 ? "" : "s"}`
+            : "Already up to date",
+        );
+      }
     } catch (e) {
       flashRefreshInfo(`Refresh failed: ${(e as Error).message}`);
     } finally {
@@ -157,24 +203,12 @@ export function PaperList() {
     }
   }
 
-  // Background fetch for the full archive so every segment can show a real
-  // count without forcing the user to switch ranges. Also re-runs after a
-  // manual refresh (`refreshTick` bump) because `onRefresh` clears
-  // rangeCounts to null so the guard below lets it fire.
-  useEffect(() => {
-    if (rangeCounts) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await api.digest(false, "all");
-        if (!cancelled) setRangeCounts(computeAllCounts(res.papers));
-      } catch {
-        // Leave rangeCounts null; UI falls back to em-dashes.
-      }
-    })();
-    return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [refreshTick]);
+  // Counts per range come from the same in-memory `papers` list, so every
+  // segment shows a real number without a second round trip to arXiv.
+  const rangeCounts = useMemo<RangeCounts>(
+    () => computeAllCounts(papers),
+    [papers],
+  );
 
   // Measure the active segment so the sliding indicator lines up precisely.
   // Re-run on range change and on container resize (left panel collapse).
@@ -203,16 +237,21 @@ export function PaperList() {
     setDigestRange(RANGE_OPTIONS[next].value);
   }
 
-  // Client-side filter: title + authors (case-insensitive substring).
+  // Client-side filter: range (by published date) + text (title/authors).
   const filteredPapers = useMemo(() => {
+    let scoped = papers;
+    if (digestRange !== "all") {
+      const cutoffMs = Date.now() - digestRange * 24 * 60 * 60 * 1000;
+      scoped = scoped.filter((p) => new Date(p.published).getTime() >= cutoffMs);
+    }
     const q = filter.trim().toLowerCase();
-    if (!q) return papers;
-    return papers.filter(
+    if (!q) return scoped;
+    return scoped.filter(
       (p) =>
         p.title.toLowerCase().includes(q) ||
         p.authors.toLowerCase().includes(q),
     );
-  }, [papers, filter]);
+  }, [papers, digestRange, filter]);
 
   // Memoize so dayGroups keeps a stable reference between renders (only
   // changes when filteredPapers changes). Without this, the derived
@@ -363,25 +402,41 @@ export function PaperList() {
   return (
     <div className="flex flex-col h-full">
       <div className="px-4 py-3">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-2">
           <div className="text-[11px] uppercase tracking-wider text-slate-400">Today {"\u00b7"} {new Date().toLocaleDateString(undefined, { month: "short", day: "numeric" })}</div>
-          <button
-            type="button"
-            onClick={onRefresh}
-            disabled={refreshing}
-            title="Refresh from arXiv"
-            aria-label="Refresh from arXiv"
-            className="rounded p-1 text-slate-400 hover:text-slate-200 hover:bg-white/[0.06] disabled:opacity-50 transition-colors cursor-pointer"
-          >
-            <RefreshCcw
-              className={`h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`}
-              aria-hidden
+          <div className="flex items-center gap-1">
+            <CategoryPicker
+              selected={digestCategories}
+              onChange={setDigestCategories}
             />
-          </button>
+            <button
+              type="button"
+              onClick={onRefresh}
+              disabled={refreshing}
+              title="Refresh from arXiv"
+              aria-label="Refresh from arXiv"
+              className="rounded p-1 text-slate-400 hover:text-slate-200 hover:bg-white/[0.06] disabled:opacity-50 transition-colors cursor-pointer"
+            >
+              <RefreshCcw
+                className={`h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`}
+                aria-hidden
+              />
+            </button>
+          </div>
         </div>
         {refreshInfo && (
           <div role="status" className="mt-1 text-[10px] text-slate-400">
             {refreshInfo}
+          </div>
+        )}
+        {fetching && !loading && (
+          <div role="status" className="mt-1 flex items-center gap-1.5 text-[10px] text-slate-400">
+            <span
+              className="inline-block h-1.5 w-1.5 rounded-full pulse-dot"
+              style={{ background: "var(--ac1)" }}
+              aria-hidden
+            />
+            Updating…
           </div>
         )}
       </div>
@@ -531,26 +586,78 @@ export function PaperList() {
             </div>
           </div>
         )}
-        {!loading && papers.length === 0 && (
+        {!loading && papers.length === 0 && digestCategories.length === 0 && (
           <div className="flex flex-col items-center justify-center gap-2 py-16 px-6 text-center">
             <div className="text-[13px] text-slate-300 font-medium">
-              No papers in this range
+              No categories selected
             </div>
             <div className="text-[11px] text-slate-400 leading-relaxed">
-              {digestRange === "all"
-                ? "The archive is empty. Run a daily build from the backend."
-                : `No arXiv papers published in the last ${digestRange} days. Try a wider range.`}
+              Click the cats button above and pick at least one to see papers.
             </div>
+          </div>
+        )}
+        {!loading && papers.length === 0 && digestCategories.length > 0 && (
+          <div className="flex flex-col items-center justify-center gap-2 py-16 px-6 text-center">
+            {outcome.kind === "rate_limited" ? (
+              <>
+                <div className="text-[13px] text-amber-200 font-medium">
+                  arXiv is rate-limiting us
+                </div>
+                <div className="text-[11px] text-slate-400 leading-relaxed">
+                  Their API throttles bursts. Wait a few minutes and hit refresh.
+                </div>
+              </>
+            ) : outcome.kind === "unreachable" ? (
+              <>
+                <div className="text-[13px] text-amber-200 font-medium">
+                  Couldn't reach arXiv
+                </div>
+                <div className="text-[11px] text-slate-400 leading-relaxed">
+                  Check your connection, then hit refresh.
+                </div>
+              </>
+            ) : outcome.kind === "error" ? (
+              <>
+                <div className="text-[13px] text-rose-200 font-medium">
+                  Couldn't load papers
+                </div>
+                <div className="text-[11px] text-slate-400 leading-relaxed">
+                  {outcome.detail}
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="text-[13px] text-slate-300 font-medium">
+                  No papers from arXiv right now
+                </div>
+                <div className="text-[11px] text-slate-400 leading-relaxed">
+                  Try widening the range or selecting more categories.
+                </div>
+              </>
+            )}
           </div>
         )}
         {!loading && papers.length > 0 && filteredPapers.length === 0 && (
           <div className="flex flex-col items-center justify-center gap-2 py-16 px-6 text-center">
-            <div className="text-[13px] text-slate-300 font-medium">
-              No matches for "{filter}"
-            </div>
-            <div className="text-[11px] text-slate-400">
-              {papers.length} paper{papers.length === 1 ? "" : "s"} in this range didn't match.
-            </div>
+            {filter.trim() ? (
+              <>
+                <div className="text-[13px] text-slate-300 font-medium">
+                  No matches for "{filter}"
+                </div>
+                <div className="text-[11px] text-slate-400">
+                  {papers.length} paper{papers.length === 1 ? "" : "s"} fetched didn't match.
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="text-[13px] text-slate-300 font-medium">
+                  Nothing in the last {digestRange === "all" ? "window" : `${digestRange} days`}
+                </div>
+                <div className="text-[11px] text-slate-400">
+                  Try a wider range — {papers.length} paper{papers.length === 1 ? "" : "s"} fetched in total.
+                </div>
+              </>
+            )}
           </div>
         )}
         {dayGroups.map((g) => {

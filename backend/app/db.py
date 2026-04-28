@@ -21,15 +21,6 @@ CREATE TABLE IF NOT EXISTS papers (
     read_state  TEXT NOT NULL DEFAULT 'unread'
 );
 
-CREATE TABLE IF NOT EXISTS builds (
-    date         TEXT PRIMARY KEY,
-    status       TEXT NOT NULL,
-    started_at   TEXT,
-    finished_at  TEXT,
-    paper_count  INTEGER,
-    log          TEXT
-);
-
 CREATE TABLE IF NOT EXISTS conversations (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     arxiv_id    TEXT NOT NULL REFERENCES papers(arxiv_id),
@@ -74,30 +65,6 @@ CREATE INDEX IF NOT EXISTS idx_glossary_arxiv ON glossary(arxiv_id);
 CREATE INDEX IF NOT EXISTS idx_events_ts ON events(ts);
 CREATE INDEX IF NOT EXISTS idx_papers_published ON papers(published);
 CREATE INDEX IF NOT EXISTS idx_conv_arxiv      ON conversations(arxiv_id);
-
-CREATE VIRTUAL TABLE IF NOT EXISTS papers_fts USING fts5(
-    arxiv_id UNINDEXED,
-    title,
-    authors,
-    abstract,
-    categories,
-    tokenize = 'porter unicode61'
-);
-
-CREATE TRIGGER IF NOT EXISTS papers_ai AFTER INSERT ON papers BEGIN
-    INSERT INTO papers_fts (arxiv_id, title, authors, abstract, categories)
-    VALUES (new.arxiv_id, new.title, new.authors, new.abstract, new.categories);
-END;
-
-CREATE TRIGGER IF NOT EXISTS papers_au AFTER UPDATE ON papers BEGIN
-    UPDATE papers_fts SET title=new.title, authors=new.authors,
-           abstract=new.abstract, categories=new.categories
-     WHERE arxiv_id=new.arxiv_id;
-END;
-
-CREATE TRIGGER IF NOT EXISTS papers_ad AFTER DELETE ON papers BEGIN
-    DELETE FROM papers_fts WHERE arxiv_id=old.arxiv_id;
-END;
 """
 
 
@@ -135,18 +102,6 @@ def init() -> None:
         conv_cols = {row[1] for row in cur.fetchall()}
         if "model" not in conv_cols:
             conn.execute("ALTER TABLE conversations ADD COLUMN model TEXT")
-
-        # Backfill papers_fts from existing rows when the FTS index is empty
-        # but the papers table has data (older DBs created before FTS5 existed).
-        cur = conn.execute("SELECT COUNT(*) FROM papers")
-        paper_count = cur.fetchone()[0]
-        cur = conn.execute("SELECT COUNT(*) FROM papers_fts")
-        fts_count = cur.fetchone()[0]
-        if paper_count > 0 and fts_count == 0:
-            conn.execute(
-                """INSERT INTO papers_fts (arxiv_id, title, authors, abstract, categories)
-                   SELECT arxiv_id, title, authors, abstract, categories FROM papers"""
-            )
 
 
 @contextmanager

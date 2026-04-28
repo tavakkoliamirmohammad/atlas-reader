@@ -26,6 +26,8 @@ type UiState = {
   lastHighlightColor: HighlightColor;
   digestRange: DigestRange;
   setDigestRange: (r: DigestRange) => void;
+  digestCategories: string[];
+  setDigestCategories: (cats: string[]) => void;
   setBackend: (b: Backend) => void;
   setCodexModel: (m: CodexModel) => void;
   setAppMode: (m: AppMode) => void;
@@ -64,8 +66,11 @@ export const useUiStore = create<UiState>()(
       codexModel: "gpt-5.4",
       backend: "codex",
       lastHighlightColor: "yellow",
-      digestRange: 7,
+      digestRange: 3,
       setDigestRange: (r) => set({ digestRange: r }),
+      digestCategories: ["cs.PL", "cs.AR", "cs.DC", "cs.PF", "cs.LG"],
+      setDigestCategories: (cats) =>
+        set({ digestCategories: Array.from(new Set(cats)) }),
       setBackend: (b) => set({ backend: b }),
       setCodexModel: (m) => set({ codexModel: m }),
       setAppMode: (m) => set({ appMode: m, readingMode: m }),
@@ -125,6 +130,7 @@ export const useUiStore = create<UiState>()(
         backend: s.backend,
         lastHighlightColor: s.lastHighlightColor,
         digestRange: s.digestRange,
+        digestCategories: s.digestCategories,
       }),
     },
   ),

@@ -22,7 +22,6 @@ def test_connect_returns_working_connection(atlas_data_dir):
         cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
         tables = {row[0] for row in cursor}
     assert "papers" in tables
-    assert "builds" in tables
     assert "conversations" in tables
     assert "prefs" in tables
 

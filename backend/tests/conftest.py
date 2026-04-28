@@ -10,6 +10,9 @@ def atlas_data_dir(monkeypatch, tmp_path):
     Also clears ATLAS_PORT / ATLAS_RUNNER_PORT so a sibling test that wrote
     them via `cli.main(["up", "--port", N])` (which sets os.environ directly,
     bypassing monkeypatch) can't leak its choices into this test.
+
+    Resets the in-process digest cache so tests asserting specific
+    `fetch_recent` call counts don't see stale entries from earlier tests.
     """
     data_dir = tmp_path / ".atlas"
     data_dir.mkdir()
@@ -17,6 +20,11 @@ def atlas_data_dir(monkeypatch, tmp_path):
     monkeypatch.setenv("ATLAS_DATA_DIR", str(data_dir))
     monkeypatch.delenv("ATLAS_PORT", raising=False)
     monkeypatch.delenv("ATLAS_RUNNER_PORT", raising=False)
+    try:
+        from app import main as _main
+        _main._digest_cache.clear()
+    except Exception:  # pragma: no cover — main may not be importable in some tests
+        pass
     return data_dir
 
 

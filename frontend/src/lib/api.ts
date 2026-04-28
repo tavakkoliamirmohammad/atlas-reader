@@ -31,12 +31,29 @@ export type HealthResponse = {
   tts?: boolean;
   backends?: { claude: boolean; codex: boolean };
   default_backend?: Backend;
-  papers_today: number;
 };
-export type DigestResponse = { count: number; papers: Paper[] };
+export type DigestFailure = {
+  category: string;
+  /**
+   * Stable identifiers so the UI can localize the message:
+   *   "rate_limited" | "unreachable" | "http_<status>" | <ExceptionName>
+   */
+  kind: string;
+};
+
+export type DigestResponse = {
+  count: number;
+  papers: Paper[];
+  /** Echoes back the categories the server actually fetched. */
+  categories?: string[];
+  /** Per-category fetch failures, for UI to surface graceful errors. */
+  failures?: DigestFailure[];
+};
 
 // Defined here (not imported from the ui-store) to avoid a circular import:
 // ui-store.ts imports `HighlightColor` + `ModelChoice` from this module.
+// Used purely for client-side range filtering — the backend always returns
+// the full live arXiv fetch and the SPA filters by `published` itself.
 export type DigestRange = 3 | 7 | 14 | 30 | "all";
 
 async function getJson<T>(path: string): Promise<T> {
@@ -47,30 +64,16 @@ async function getJson<T>(path: string): Promise<T> {
 
 export const api = {
   health:  () => getJson<HealthResponse>("/api/health"),
-  digest:  (build = false, days: DigestRange = 7, backend?: Backend) => {
+  digest:  (categories?: string[], fresh: boolean = false) => {
     const params = new URLSearchParams();
-    if (build) params.set("build", "true");
-    params.set("days", String(days));
-    if (backend) params.set("backend", backend);
+    if (categories?.length) params.set("cats", categories.join(","));
+    if (fresh) params.set("fresh", "true");
     const qs = params.toString();
     return getJson<DigestResponse>(`/api/digest${qs ? `?${qs}` : ""}`);
   },
   paper:   (id: string) => getJson<Paper>(`/api/papers/${encodeURIComponent(id)}`),
   pdfUrl:  (id: string) => u(`/api/pdf/${encodeURIComponent(id)}`),
 };
-
-export interface DigestRefreshResult {
-  date: string;
-  new: number;
-  total_papers: number;
-  duration_ms: number;
-}
-
-export async function refreshDigest(): Promise<DigestRefreshResult> {
-  const r = await fetch(u("/api/digest/refresh"), { method: "POST" });
-  if (!r.ok) throw new Error(`refreshDigest ${r.status}: ${await r.text()}`);
-  return r.json();
-}
 
 // Claude side stays as three stable aliases — the Anthropic CLI auto-resolves
 // each to the latest concrete model, so this set rarely needs editing.

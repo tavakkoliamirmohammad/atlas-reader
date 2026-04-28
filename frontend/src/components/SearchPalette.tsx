@@ -197,7 +197,7 @@ export function SearchPalette({ open, onClose }: Props) {
 
           {results.length === 0 && !query.trim() ? (
             <li className="p-4 text-sm text-zinc-500">
-              Type to search across all cached papers.
+              Type to search arXiv (live).
             </li>
           ) : null}
 

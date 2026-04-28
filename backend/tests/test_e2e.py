@@ -12,10 +12,9 @@ from app.main import app
 
 @pytest.mark.asyncio
 async def test_full_round_trip_health_digest_paper_pdf(atlas_data_dir, fixtures_dir):
-    """Build today's digest, fetch the digest, fetch one paper, fetch its PDF."""
+    """Live-fetch the digest, look up one paper (lazy-importing it), fetch its PDF."""
     db.init()
-    # Yesterday — inside list_recent's 7-day window so the digest pipeline
-    # surfaces this paper regardless of when the test is run.
+    # Yesterday — keeps test stable regardless of when it's run.
     recent_iso = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
     pl = [Paper("99", "Title", "A", "An abstract", "cs.PL", recent_iso)]
     empty: list[Paper] = []
@@ -49,15 +48,17 @@ async def test_full_round_trip_health_digest_paper_pdf(atlas_data_dir, fixtures_
 
         stream = _fake_stream
 
-    # Five category queries now: cs.PL, cs.AR, cs.DC, cs.PF, cs.LG.
-    with patch("app.digest.arxiv.fetch_recent", new=AsyncMock(side_effect=[pl, empty, empty, empty, empty])):
+    # /api/digest fetches all five categories in parallel, /api/papers/<id>
+    # uses fetch_by_id when the row isn't cached. Patch both arxiv functions.
+    digest_fetch = AsyncMock(side_effect=[pl, empty, empty, empty, empty])
+    by_id_fetch = AsyncMock(return_value=pl[0])
+    with patch("app.main.arxiv.fetch_recent", digest_fetch), \
+         patch("app.main.arxiv.fetch_by_id", by_id_fetch):
         with patch("app.main.httpx.AsyncClient", _FakeClient):
             with patch(
                 "app.main.ai_backend.available_backends",
                 new=AsyncMock(return_value={"claude": False, "codex": False}),
             ), patch(
-                # /api/health probes the TTS sidecar; the fake httpx client
-                # above doesn't implement .get, so short-circuit the probe.
                 "app.main.tts_client.health_ok",
                 new=AsyncMock(return_value=False),
             ):
@@ -65,7 +66,7 @@ async def test_full_round_trip_health_digest_paper_pdf(atlas_data_dir, fixtures_
                     h = await c.get("/api/health")
                     assert h.json()["ai"] is False
 
-                    d = await c.get("/api/digest?build=true")
+                    d = await c.get("/api/digest")
                     assert d.json()["count"] == 1
                     assert d.json()["papers"][0]["arxiv_id"] == "99"
 

@@ -1,71 +1,68 @@
-"""Full-text search over cached papers via SQLite FTS5."""
+"""Live full-text search via the arXiv API.
+
+Atlas no longer maintains a local FTS5 index — there's no persistent
+paper cache to index. Each search call hits arXiv directly with an
+`all:` keyword query, mirroring the live-fetch model used by the
+digest endpoint.
+"""
 
 from __future__ import annotations
 
+import logging
 import re
 
-from app import db
+from app import arxiv
 
 
-# Keep alphanumerics, whitespace, and a small set of safe FTS5 operators.
-# Anything else gets stripped so that user input cannot crash the parser
-# (e.g. unbalanced quotes, stray colons, parens).
+log = logging.getLogger(__name__)
+
+# Strip anything that arXiv's query parser would treat as syntax. Keeping
+# this conservative (alphanumerics + whitespace + dash + underscore)
+# prevents stray quotes/parens from blowing up an otherwise valid search.
 _SAFE_QUERY = re.compile(r"[^A-Za-z0-9\s_\-]")
 
 
-def _sanitize(query: str) -> str:
-    """Return an FTS5-safe MATCH expression for a free-form user query.
-
-    Each remaining token is wrapped in double quotes and suffixed with the
-    prefix-match operator, so 'GPU kernel' becomes '"GPU"* "kernel"*'. This
-    gives prefix matching while keeping the parser happy regardless of input.
-    """
-    cleaned = _SAFE_QUERY.sub(" ", query)
+def _build_query(raw: str) -> str:
+    cleaned = _SAFE_QUERY.sub(" ", raw)
     tokens = [t for t in cleaned.split() if t]
     if not tokens:
         return ""
-    return " ".join(f'"{t}"*' for t in tokens)
+    # Quote each token so multi-word queries don't get split into separate
+    # OR-ed terms by arXiv's parser. `all:` searches title+abstract+authors.
+    return " AND ".join(f'all:"{t}"' for t in tokens)
 
 
-def search(query: str, limit: int = 20) -> list[dict]:
-    """Run an FTS5 MATCH against papers_fts and return ranked hits.
+async def search(query: str, limit: int = 20) -> list[dict]:
+    """Return up to `limit` arXiv hits for `query`, newest first.
 
-    Empty queries return []. Each result is a dict with keys
-    arxiv_id, title, authors, snippet, rank.
+    Empty queries return []. Network errors return [] (callers see no
+    results rather than a 500). Each result has the same shape the SPA
+    expects: arxiv_id, title, authors, snippet, rank.
     """
     if not query or not query.strip():
         return []
-    match = _sanitize(query)
-    if not match:
+    expr = _build_query(query)
+    if not expr:
         return []
 
-    sql = """
-        SELECT
-            f.arxiv_id                                                 AS arxiv_id,
-            f.title                                                    AS title,
-            f.authors                                                  AS authors,
-            snippet(papers_fts, 3, '<mark>', '</mark>', '...', 16)     AS snippet,
-            bm25(papers_fts)                                           AS rank
-          FROM papers_fts AS f
-         WHERE papers_fts MATCH ?
-         ORDER BY rank
-         LIMIT ?
-    """
-    with db.connect() as conn:
-        try:
-            cur = conn.execute(sql, (match, int(limit)))
-        except Exception:
-            # Defensive: if the sanitized query is somehow still invalid,
-            # return no results rather than 500-ing the API.
-            return []
-        rows = cur.fetchall()
-    return [
-        {
-            "arxiv_id": r["arxiv_id"],
-            "title": r["title"],
-            "authors": r["authors"],
-            "snippet": r["snippet"],
-            "rank": r["rank"],
-        }
-        for r in rows
-    ]
+    try:
+        papers = await arxiv.fetch_recent(expr, max_results=int(limit), timeout=20.0)
+    except Exception as exc:  # noqa: BLE001 — surface as empty result, not 500
+        log.warning("search: arxiv fetch failed (%s): %s", type(exc).__name__, exc)
+        return []
+
+    out: list[dict] = []
+    for i, p in enumerate(papers):
+        # No FTS5 ranking is available; return papers in arXiv's submitted-date
+        # order (descending) and surface a tiny abstract excerpt as the snippet.
+        snippet = p.abstract[:240] + ("..." if len(p.abstract) > 240 else "")
+        out.append(
+            {
+                "arxiv_id": p.arxiv_id,
+                "title": p.title,
+                "authors": p.authors,
+                "snippet": snippet,
+                "rank": float(i),
+            }
+        )
+    return out

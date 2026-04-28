@@ -1,5 +1,3 @@
-from datetime import datetime, timedelta, timezone
-
 import pytest
 from httpx import ASGITransport, AsyncClient
 from unittest.mock import AsyncMock, patch
@@ -26,7 +24,6 @@ async def test_health_endpoint_returns_ai_status(atlas_data_dir):
     assert body["ai"] is True
     assert body["backends"] == {"claude": True, "codex": False}
     assert body["default_backend"] == "codex"
-    assert "papers_today" in body
 
 
 @pytest.mark.asyncio
@@ -90,30 +87,127 @@ async def test_health_endpoint_caches_tts_probe(atlas_data_dir):
 
 
 @pytest.mark.asyncio
-async def test_digest_endpoint_triggers_build_and_returns_papers(atlas_data_dir):
+async def test_digest_endpoint_does_a_live_arxiv_fetch(atlas_data_dir):
+    """Each call hits arXiv (one query per category) and returns a flat list."""
     db.init()
-    sample = [Paper("1", "T", "A", "x", "cs.PL", "2026-04-19T08:00:00Z")]
-    fake_build = AsyncMock(return_value=[])
-    with patch("app.main.digest.build_today", fake_build):
-        with patch("app.main.papers.list_recent", return_value=sample):
-            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
-                r = await c.get("/api/digest?build=true")
+    pl = [Paper("pl-1", "T-PL", "A", "x", "cs.PL", "2026-04-21T08:00:00Z")]
+    ar = [Paper("ar-1", "T-AR", "A", "x", "cs.AR", "2026-04-22T08:00:00Z")]
+    empty: list[Paper] = []
+    fetch = AsyncMock(side_effect=[pl, ar, empty, empty, empty])
+
+    with patch("app.main.arxiv.fetch_recent", fetch):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            r = await c.get("/api/digest")
     assert r.status_code == 200
     body = r.json()
-    assert body["count"] == 1
-    assert body["papers"][0]["arxiv_id"] == "1"
-    fake_build.assert_awaited_once()
+    assert body["count"] == 2
+    # Newest first (sorted by published desc).
+    assert [p["arxiv_id"] for p in body["papers"]] == ["ar-1", "pl-1"]
+    # Five categories fetched, each as its own awaited call.
+    assert fetch.await_count == 5
 
 
 @pytest.mark.asyncio
-async def test_digest_without_build_does_not_call_builder(atlas_data_dir):
+async def test_digest_endpoint_dedupes_cross_category_duplicates(atlas_data_dir):
     db.init()
-    fake_build = AsyncMock()
-    with patch("app.main.digest.build_today", fake_build):
+    same = Paper("dup-1", "Cross-listed", "A", "x", "cs.PL", "2026-04-22T08:00:00Z")
+    fetch = AsyncMock(side_effect=[[same], [same], [], [], []])
+    with patch("app.main.arxiv.fetch_recent", fetch):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
             r = await c.get("/api/digest")
-    fake_build.assert_not_called()
+    assert r.json()["count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_digest_endpoint_tolerates_partial_fetch_failures(atlas_data_dir):
+    """One category raising never fails the whole response."""
+    db.init()
+    survivor = Paper("ok-1", "Survivor", "A", "x", "cs.AR", "2026-04-22T08:00:00Z")
+    fetch = AsyncMock(side_effect=[
+        RuntimeError("flaky"),
+        [survivor],
+        RuntimeError("flaky"),
+        [],
+        [],
+    ])
+    with patch("app.main.arxiv.fetch_recent", fetch):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            r = await c.get("/api/digest")
     assert r.status_code == 200
+    body = r.json()
+    assert [p["arxiv_id"] for p in body["papers"]] == ["ok-1"]
+    # Failures are surfaced so the SPA can render a graceful banner when
+    # papers ends up empty (here it didn't, so the banner stays hidden).
+    assert {f["category"] for f in body["failures"]} == {"cs.PL", "cs.DC"}
+
+
+@pytest.mark.asyncio
+async def test_digest_endpoint_classifies_rate_limit_failures(atlas_data_dir):
+    """A 429 from arXiv shows up as kind='rate_limited' in the response."""
+    import httpx as _httpx
+    db.init()
+    fake_resp = _httpx.Response(429, request=_httpx.Request("GET", "http://x"))
+    rate_err = _httpx.HTTPStatusError("429", request=fake_resp.request, response=fake_resp)
+    fetch = AsyncMock(side_effect=[rate_err] * 5)
+    with patch("app.main.arxiv.fetch_recent", fetch):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            r = await c.get("/api/digest")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["count"] == 0
+    assert all(f["kind"] == "rate_limited" for f in body["failures"])
+
+
+@pytest.mark.asyncio
+async def test_digest_endpoint_uses_user_supplied_categories(atlas_data_dir):
+    """`?cats=` overrides the default 5 — only those categories get fetched."""
+    db.init()
+    fetch = AsyncMock(return_value=[])
+    with patch("app.main.arxiv.fetch_recent", fetch):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            r = await c.get("/api/digest?cats=cs.PL,math.OC")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["categories"] == ["cs.PL", "math.OC"]
+    queries = [args[0][0] for args in fetch.await_args_list]
+    assert queries == ["cat:cs.PL", "cat:math.OC"]
+
+
+@pytest.mark.asyncio
+async def test_digest_endpoint_rejects_malformed_category(atlas_data_dir):
+    db.init()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        r = await c.get("/api/digest?cats=cs.PL,bad cat")
+    assert r.status_code == 400
+    assert "invalid arxiv category" in r.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_digest_endpoint_falls_back_to_defaults_when_cats_blank(atlas_data_dir):
+    db.init()
+    fetch = AsyncMock(return_value=[])
+    with patch("app.main.arxiv.fetch_recent", fetch):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            r = await c.get("/api/digest?cats=")
+    assert r.status_code == 200
+    assert r.json()["categories"] == ["cs.PL", "cs.AR", "cs.DC", "cs.PF", "cs.LG"]
+
+
+@pytest.mark.asyncio
+async def test_digest_caches_per_category_and_fresh_busts(atlas_data_dir):
+    """Second call within TTL is served from cache; ?fresh=true forces a refetch."""
+    db.init()
+    sample = [Paper("c-1", "T", "A", "x", "cs.PL", "2026-04-22T08:00:00Z")]
+    fetch = AsyncMock(return_value=sample)
+    with patch("app.main.arxiv.fetch_recent", fetch):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            r1 = await c.get("/api/digest?cats=cs.PL")
+            r2 = await c.get("/api/digest?cats=cs.PL")
+            r3 = await c.get("/api/digest?cats=cs.PL&fresh=true")
+    assert r1.status_code == r2.status_code == r3.status_code == 200
+    # Cache hit on r2 means arXiv was only hit once for the first two calls.
+    # `fresh=true` on r3 always forces another fetch.
+    assert fetch.await_count == 2
 
 
 @pytest.mark.asyncio
@@ -406,35 +500,6 @@ async def test_conversations_endpoint_returns_history(atlas_data_dir):
 
 
 @pytest.mark.asyncio
-async def test_build_progress_emits_sse_events_from_builds_log(atlas_data_dir):
-    db.init()
-    with db.connect() as conn:
-        conn.execute(
-            "INSERT INTO builds (date, status, log) VALUES (?, ?, ?)",
-            ("2026-04-19", "done",
-             "Fetching arXiv...\nRanking with Sonnet...\nSummarizing 5/30...\ndone"),
-        )
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
-        async with c.stream("GET", "/api/build-progress?date=2026-04-19") as r:
-            body = b""
-            async for chunk in r.aiter_bytes():
-                body += chunk
-    text = body.decode()
-    assert "Fetching arXiv..." in text
-    assert "Ranking with Sonnet..." in text
-    assert "Summarizing 5/30..." in text
-    assert "event: done" in text
-
-
-@pytest.mark.asyncio
-async def test_build_progress_returns_404_when_no_build_for_date(atlas_data_dir):
-    db.init()
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
-        r = await c.get("/api/build-progress?date=2099-01-01")
-    assert r.status_code == 404
-
-
-@pytest.mark.asyncio
 async def test_glossary_get_returns_empty_initially(atlas_data_dir):
     db.init()
     papers.upsert([Paper("g100", "T", "A", "x", "cs.PL", "2026-04-19T08:00:00Z")])
@@ -501,93 +566,3 @@ async def test_glossary_definition_404_for_unknown_paper(atlas_data_dir):
     assert r.status_code == 404
 
 
-@pytest.mark.asyncio
-async def test_digest_days_all_returns_every_paper(atlas_data_dir):
-    db.init()
-    from app.arxiv import Paper
-    # Seed one recent + one ancient paper.
-    recent_iso = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
-    papers.upsert([
-        Paper("rangeA", "recent", "A", "x", "cs.PL", recent_iso),
-        Paper("rangeB", "ancient", "A", "x", "cs.PL", "2019-01-01T00:00:00Z"),
-    ])
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
-        seven = await c.get("/api/digest?days=7")
-        all_ = await c.get("/api/digest?days=all")
-    assert {p["arxiv_id"] for p in seven.json()["papers"]} == {"rangeA"}
-    assert {p["arxiv_id"] for p in all_.json()["papers"]} == {"rangeA", "rangeB"}
-
-
-@pytest.mark.asyncio
-async def test_digest_days_rejects_invalid(atlas_data_dir):
-    db.init()
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
-        bad = await c.get("/api/digest?days=banana")
-        neg = await c.get("/api/digest?days=-1")
-    assert bad.status_code == 400
-    assert neg.status_code == 400
-
-
-@pytest.mark.asyncio
-async def test_digest_refresh_endpoint_returns_stats(atlas_data_dir, monkeypatch):
-    db.init()
-
-    async def _fake_build(**_kw):
-        # Simulate inserting one new paper.
-        papers.upsert([
-            Paper(
-                arxiv_id="2604.00001",
-                title="t",
-                authors="a",
-                abstract="x",
-                categories="cs.PL",
-                published="2026-04-22T08:00:00Z",
-            )
-        ])
-        return []
-
-    monkeypatch.setattr("app.main.digest.build_today", _fake_build)
-
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
-        r = await c.post("/api/digest/refresh")
-    assert r.status_code == 200
-    body = r.json()
-    assert body["new"] == 1
-    assert body["total_papers"] >= 1
-    assert body["duration_ms"] >= 0
-    assert "date" in body
-
-
-@pytest.mark.asyncio
-async def test_digest_refresh_returns_zero_new_when_idempotent(atlas_data_dir, monkeypatch):
-    db.init()
-    papers.upsert([
-        Paper("x1", "t", "a", "x", "cs.PL", "2026-04-22T08:00:00Z"),
-    ])
-
-    async def _fake_build(**_kw):
-        return []
-
-    monkeypatch.setattr("app.main.digest.build_today", _fake_build)
-
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
-        r = await c.post("/api/digest/refresh")
-    assert r.status_code == 200
-    body = r.json()
-    assert body["new"] == 0
-    assert body["total_papers"] == 1
-
-
-@pytest.mark.asyncio
-async def test_digest_refresh_returns_502_on_fetch_failure(atlas_data_dir, monkeypatch):
-    db.init()
-
-    async def _boom(**_kw):
-        raise RuntimeError("arxiv down")
-
-    monkeypatch.setattr("app.main.digest.build_today", _boom)
-
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
-        r = await c.post("/api/digest/refresh")
-    assert r.status_code == 502
-    assert "arxiv fetch failed" in r.json()["detail"]

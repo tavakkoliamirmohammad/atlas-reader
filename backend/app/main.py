@@ -8,7 +8,6 @@ import json
 import os
 import time as _time
 from contextlib import asynccontextmanager
-from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import httpx
@@ -23,10 +22,10 @@ from app import (
     ai_backend,
     arxiv,
     asker,
+    cleanup,
     codex_models,
     conversations,
     db,
-    digest,
     glossary,
     health,
     highlights,
@@ -42,39 +41,18 @@ from app import (
 from fastapi import UploadFile, File, Form
 
 
-async def _startup_catchup() -> None:
-    """If the last digest build was more than 6h ago, refresh once in the
-    background. Covers the case where the machine was off at the arXiv
-    publication window.
+async def _startup_maintenance() -> None:
+    """Run cheap maintenance sweeps once at startup.
 
-    Also runs the cheap maintenance sweeps (orphan-PDF prune + optional
-    chat-retention prune) once at startup regardless of digest freshness.
+    Atlas no longer caches arXiv listings, so there's no digest catch-up to
+    do here — the next page load will hit arXiv live. We only run the
+    always-safe disk hygiene tasks: orphan-PDF prune, opt-in chat retention,
+    and the podcast TTL sweep.
     """
     import logging
 
     log = logging.getLogger("atlas.scheduler")
-    try:
-        with db.connect() as conn:
-            row = conn.execute(
-                "SELECT finished_at FROM builds "
-                "WHERE finished_at IS NOT NULL "
-                "ORDER BY finished_at DESC LIMIT 1"
-            ).fetchone()
-        stale = True
-        if row and row[0]:
-            last = datetime.fromisoformat(row[0].replace("Z", "+00:00"))
-            stale = datetime.now(timezone.utc) - last > timedelta(hours=6)
-        if stale:
-            log.info("scheduler: last build >6h old (or none), refreshing")
-            await digest.build_today()
-            log.info("scheduler: catchup complete")
-        else:
-            log.info("scheduler: recent build found, skipping catchup")
-    except Exception as e:  # noqa: BLE001
-        log.warning("scheduler: catchup failed: %s: %s", type(e).__name__, e)
 
-    # Orphan PDF prune + optional chat retention — these are cheap,
-    # run once at startup regardless of digest freshness.
     try:
         orphans = conversations.prune_orphan_pdfs()
         if orphans:
@@ -98,17 +76,22 @@ async def _startup_catchup() -> None:
         except Exception as e:  # noqa: BLE001
             log.warning("scheduler: chat prune failed: %s: %s", type(e).__name__, e)
 
+    try:
+        cleanup.sweep(force=True)
+    except Exception as e:  # noqa: BLE001
+        log.warning("scheduler: podcast cleanup failed: %s: %s", type(e).__name__, e)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     db.init()
-    catchup_task = asyncio.create_task(_startup_catchup())
+    maintenance_task = asyncio.create_task(_startup_maintenance())
     try:
         yield
     finally:
-        catchup_task.cancel()
+        maintenance_task.cancel()
         try:
-            await catchup_task
+            await maintenance_task
         except (asyncio.CancelledError, Exception):   # noqa: BLE001
             pass
 
@@ -162,7 +145,6 @@ async def get_health() -> dict:
         "backends": backends,
         "default_backend": ai_backend.DEFAULT_BACKEND,
         "tts": await _tts_available(),
-        "papers_today": len(papers.list_recent(days=1)),
     }
 
 
@@ -211,53 +193,152 @@ def _row_to_dict(row) -> dict:
     raise TypeError(f"Cannot convert {type(row).__name__} to dict")
 
 
-@app.get("/api/digest")
-async def get_digest(
-    build: bool = False,
-    days: str = "7",
-) -> dict:
-    if build:
-        await digest.build_today()
-    days_arg: int | None
-    if days == "all":
-        days_arg = None
-    else:
-        try:
-            n = int(days)
-            if n <= 0:
-                raise HTTPException(status_code=400, detail="days must be positive or 'all'")
-            days_arg = n
-        except ValueError:
-            raise HTTPException(status_code=400, detail="days must be an integer or 'all'")
-    rows = papers.list_recent(days=days_arg)
-    return {"count": len(rows), "papers": [_row_to_dict(r) for r in rows]}
+# Default categories pulled from arXiv when the client doesn't pass `?cats=`.
+# Order here only affects which entry wins on a cross-category duplicate id
+# (first wins).
+DIGEST_DEFAULT_CATEGORIES = ("cs.PL", "cs.AR", "cs.DC", "cs.PF", "cs.LG")
+DIGEST_MAX_PER_CATEGORY = 100
+DIGEST_FETCH_TIMEOUT = 30.0
+DIGEST_MAX_CATEGORIES = 30
+
+# Per-category in-memory TTL cache. arXiv publishes new submissions on a
+# rough daily cadence, so a 2-hour cache stays fresh for typical reading
+# sessions while making category toggles, range switches and follow-up
+# loads instant. The refresh button bypasses this with `?fresh=true`,
+# which is the user's escape hatch when they want to see the latest now.
+_DIGEST_CACHE_TTL_S = 2 * 60 * 60
+_digest_cache: dict[str, tuple[float, list]] = {}
+
+# arXiv category codes look like `cs.PL`, `math.OC`, `stat.ML`, or bare
+# archive prefixes like `physics` / `q-bio`. This regex is permissive
+# enough to cover all of them while rejecting anything that could smuggle
+# operators or whitespace into the search query.
+import re as _re
+_ARXIV_CAT = _re.compile(r"^[a-z][a-z\-]*(\.[A-Z]{2})?$")
 
 
-@app.post("/api/digest/refresh")
-async def post_digest_refresh() -> dict:
-    """Force a fresh arXiv fetch + upsert. Idempotent when nothing is new."""
-    # Count rows before so we can report "new".
-    with db.connect() as conn:
-        row = conn.execute("SELECT COUNT(*) FROM papers").fetchone()
-        before = row[0] if row else 0
+def _parse_categories(raw: str | None) -> tuple[str, ...]:
+    """Validate the user-supplied ?cats=… and fall back to defaults if absent."""
+    if raw is None or not raw.strip():
+        return DIGEST_DEFAULT_CATEGORIES
+    seen: list[str] = []
+    for token in raw.split(","):
+        c = token.strip()
+        if not c:
+            continue
+        if not _ARXIV_CAT.match(c):
+            raise HTTPException(
+                status_code=400, detail=f"invalid arxiv category: {c!r}"
+            )
+        if c not in seen:
+            seen.append(c)
+    if not seen:
+        return DIGEST_DEFAULT_CATEGORIES
+    if len(seen) > DIGEST_MAX_CATEGORIES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"too many categories (max {DIGEST_MAX_CATEGORIES})",
+        )
+    return tuple(seen)
 
-    t0 = _time.monotonic()
-    try:
-        await digest.build_today()
-    except Exception as exc:                            # noqa: BLE001
-        raise HTTPException(status_code=502, detail=f"arxiv fetch failed: {exc}")
-    duration_ms = int((_time.monotonic() - t0) * 1000)
 
-    with db.connect() as conn:
-        row = conn.execute("SELECT COUNT(*) FROM papers").fetchone()
-        after = row[0] if row else 0
-
+def _paper_to_dict(p: arxiv.Paper) -> dict:
+    """Match the legacy `papers` row shape so the SPA's Paper type is unchanged."""
     return {
-        "date": date.today().isoformat(),
-        "new": max(0, after - before),
-        "total_papers": after,
-        "duration_ms": duration_ms,
+        "arxiv_id": p.arxiv_id,
+        "title": p.title,
+        "authors": p.authors,
+        "abstract": p.abstract,
+        "categories": p.categories,
+        "published": p.published,
+        "pdf_path": None,
+        "ai_tier": None,
+        "ai_score": None,
+        "read_state": "unread",
     }
+
+
+@app.get("/api/digest")
+async def get_digest(cats: str | None = None, fresh: bool = False) -> dict:
+    """Live arXiv fetch — every page load is a fresh request.
+
+    `cats` is an optional comma-separated list of arXiv category codes
+    (e.g. `cs.PL,cs.AR,math.OC`). When omitted, falls back to a curated
+    default set. Each category fires a parallel fetch; partial failures
+    are tolerated (whatever came back is returned). The frontend filters
+    by date client-side.
+
+    `fresh=true` bypasses the per-category in-memory cache. The user-
+    facing refresh button passes this so an explicit "show me the
+    newest" doesn't get a stale snapshot.
+
+    Also kicks the throttled cleanup sweep as a fire-and-forget side
+    effect: each page load is a natural opportunity to prune stale
+    podcast files without making the user wait.
+    """
+    categories = _parse_categories(cats)
+    asyncio.create_task(asyncio.to_thread(cleanup.sweep))
+
+    async def _fetch(cat: str) -> list[arxiv.Paper]:
+        # Per-category cache: a category that just came back fresh can
+        # serve any future digest request that includes it, regardless of
+        # what other categories ride alongside.
+        now = _time.monotonic()
+        if not fresh:
+            entry = _digest_cache.get(cat)
+            if entry and (now - entry[0]) < _DIGEST_CACHE_TTL_S:
+                return entry[1]
+        result = await arxiv.fetch_recent(
+            f"cat:{cat}",
+            max_results=DIGEST_MAX_PER_CATEGORY,
+            timeout=DIGEST_FETCH_TIMEOUT,
+        )
+        _digest_cache[cat] = (now, result)
+        return result
+
+    results = await asyncio.gather(
+        *(_fetch(c) for c in categories),
+        return_exceptions=True,
+    )
+
+    import logging
+    log = logging.getLogger("atlas.digest")
+    seen: dict[str, arxiv.Paper] = {}
+    failures: list[dict] = []
+    for cat, res in zip(categories, results):
+        if isinstance(res, Exception):
+            kind = _classify_fetch_error(res)
+            log.warning("digest: fetch failed cat:%s kind=%s err=%s",
+                        cat, kind, res)
+            failures.append({"category": cat, "kind": kind})
+            continue
+        for p in res:
+            seen.setdefault(p.arxiv_id, p)
+
+    items = sorted(seen.values(), key=lambda p: p.published, reverse=True)
+    return {
+        "count": len(items),
+        "papers": [_paper_to_dict(p) for p in items],
+        "categories": list(categories),
+        "failures": failures,
+    }
+
+
+def _classify_fetch_error(exc: BaseException) -> str:
+    """Classify an arXiv fetch failure into a stable string the SPA can render.
+
+    The backend already retries 429/503 with backoff; if we still see one
+    here, the API is genuinely throttling our IP and the right thing for
+    the UI is to say so plainly.
+    """
+    if isinstance(exc, httpx.HTTPStatusError):
+        sc = exc.response.status_code
+        if sc in (429, 503):
+            return "rate_limited"
+        return f"http_{sc}"
+    if isinstance(exc, (httpx.TimeoutException, httpx.TransportError)):
+        return "unreachable"
+    return type(exc).__name__
 
 
 class ArxivUnavailable(Exception):
@@ -579,40 +660,6 @@ async def delete_conversations(arxiv_id: str) -> Response:
     return Response(status_code=204)
 
 
-def _build_row(date_str: str):
-    with db.connect() as conn:
-        cur = conn.execute("SELECT status, log FROM builds WHERE date = ?", (date_str,))
-        return cur.fetchone()
-
-
-async def _build_progress_events(date_str: str):
-    """Emit one SSE event per line of the build's log; emit terminal event at end."""
-    emitted = 0
-    while True:
-        row = _build_row(date_str)
-        if row is None:
-            return
-        lines = (row["log"] or "").splitlines()
-        for line in lines[emitted:]:
-            yield f"data: {line}\n\n"
-        emitted = len(lines)
-        if row["status"] in ("done", "failed"):
-            yield f"event: {row['status']}\ndata: {row['status']}\n\n"
-            return
-        await asyncio.sleep(0.25)
-
-
-@app.get("/api/build-progress")
-async def get_build_progress(date: str):
-    if _build_row(date) is None:
-        raise HTTPException(status_code=404, detail="no build for that date")
-    return StreamingResponse(
-        _build_progress_events(date),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache"},
-    )
-
-
 class HighlightBody(BaseModel):
     quote: str
     color: str = "yellow"
@@ -682,9 +729,9 @@ async def get_glossary_definition(arxiv_id: str, term: str) -> dict:
 
 @app.get("/api/search")
 async def get_search(q: str = "", limit: int = 20) -> dict:
-    """Full-text search across cached papers (title, authors, abstract, categories)."""
+    """Live arXiv keyword search (title + abstract + authors)."""
     capped = max(1, min(int(limit), 100))
-    results = search.search(q, limit=capped)
+    results = await search.search(q, limit=capped)
     return {"count": len(results), "results": results}
 
 

@@ -16,11 +16,9 @@ import { ShortcutsOverlay } from "./components/ShortcutsOverlay";
 import { CommandPalette } from "./components/CommandPalette";
 import { SearchPalette } from "./components/SearchPalette";
 import { Footer } from "./components/Footer";
-import { BuildProgressOverlay } from "./components/BuildProgressOverlay";
 import { BackendOfflineOverlay } from "./components/BackendOfflineOverlay";
 import { MiniAudioPlayer } from "./components/MiniAudioPlayer";
 import { usePodcastStore } from "./stores/podcast-store";
-import { u } from "./lib/api";
 
 export default function App() {
   const leftCollapsed = useUiStore((s) => s.leftCollapsed);
@@ -51,21 +49,6 @@ export default function App() {
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
-  const [buildOpen, setBuildOpen] = useState(false);
-  const todayISO = new Date().toISOString().slice(0, 10);
-
-  // On first load, if /api/digest is empty, kick off a build with progress overlay.
-  // `rank=false` skips the AI tiering pass so papers appear as soon as arXiv
-  // responds. Ranking becomes opt-in via UI action rather than a blocking
-  // first-load cost.
-  useEffect(() => {
-    fetch(u("/api/digest")).then((r) => r.json()).then((b) => {
-      if ((b?.count ?? 0) === 0) {
-        setBuildOpen(true);
-        fetch(u("/api/digest?build=true&rank=false")).catch(() => {});
-      }
-    }).catch(() => {});
-  }, []);
 
   const readerMatch = useMatch("/reader/:arxivId");
   const onReaderRoute = !!readerMatch;
@@ -145,7 +128,6 @@ export default function App() {
           }}
         />
         <SearchPalette open={searchOpen} onClose={() => setSearchOpen(false)} />
-        <BuildProgressOverlay open={buildOpen} date={todayISO} onDone={() => setBuildOpen(false)} />
       </div>
       <MiniAudioPlayer />
       <Footer />
