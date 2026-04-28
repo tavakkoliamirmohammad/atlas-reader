@@ -489,7 +489,7 @@ export function ChatPanel() {
               e.preventDefault();
               send();
             }}
-            placeholder="Ask anything about this paper... (Enter to send, Shift+Enter for newline)"
+            placeholder="Ask anything about this paper…"
             disabled={streaming}
             rows={3}
             className="bg-transparent border-0 outline-none text-[13px] leading-relaxed text-slate-100 placeholder:text-slate-500 resize-none disabled:opacity-50 min-h-[60px] max-h-[200px]"
