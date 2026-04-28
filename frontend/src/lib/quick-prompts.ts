@@ -28,6 +28,18 @@ export const QUICK_PROMPTS: QuickPrompt[] = [
     icon: "≈",
   },
   {
+    label: "Strengths & weaknesses",
+    displayLabel: "Strengths & weaknesses",
+    prompt:
+      "Give a candid assessment of this paper's strengths and weaknesses. " +
+      "Use exactly two sections — `## Strengths` and `## Weaknesses` — each " +
+      "with 3–5 concise bullets. Cover real limitations the authors acknowledge " +
+      "AND limitations they don't (e.g. evaluation gaps, threats to validity, " +
+      "scalability concerns, missing baselines). Be specific; cite a section, " +
+      "table, or figure where it grounds the claim.",
+    icon: "⚖",
+  },
+  {
     label: "Open questions",
     displayLabel: "Open questions",
     prompt:

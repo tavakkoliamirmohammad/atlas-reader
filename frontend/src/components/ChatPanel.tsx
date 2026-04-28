@@ -466,9 +466,14 @@ export function ChatPanel() {
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); send(); }
+              // Enter sends; Shift+Enter (or any IME composition) inserts a
+              // newline. Cmd/Ctrl+Enter still sends as a power-user fallback.
+              if (e.key !== "Enter") return;
+              if (e.shiftKey || e.nativeEvent.isComposing) return;
+              e.preventDefault();
+              send();
             }}
-            placeholder="Ask anything about this paper..."
+            placeholder="Ask anything about this paper... (Enter to send, Shift+Enter for newline)"
             disabled={streaming}
             rows={3}
             className="bg-transparent border-0 outline-none text-[13px] leading-relaxed text-slate-100 placeholder:text-slate-500 resize-none disabled:opacity-50 min-h-[60px] max-h-[200px]"

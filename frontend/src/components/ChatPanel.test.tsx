@@ -63,3 +63,39 @@ describe("ChatPanel pinned quote", () => {
     expect(useUiStore.getState().pinnedQuote).toBeNull();
   });
 });
+
+describe("ChatPanel Enter / Shift+Enter", () => {
+  beforeEach(() => {
+    useUiStore.setState({ pinnedQuote: null });
+    if (!(Element.prototype as unknown as { scrollIntoView?: unknown }).scrollIntoView) {
+      (Element.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView = () => {};
+    }
+    vi.clearAllMocks();
+  });
+
+  it("Enter sends the message", async () => {
+    const user = userEvent.setup();
+    renderInReader();
+    const textarea = screen.getByPlaceholderText(/Ask anything about this paper/i);
+    await user.type(textarea, "what is this?");
+    await user.keyboard("{Enter}");
+
+    const { streamAsk } = await import("@/lib/api");
+    expect(streamAsk).toHaveBeenCalled();
+    const sentText = (streamAsk as ReturnType<typeof vi.fn>).mock.calls[0][1] as string;
+    expect(sentText).toContain("what is this?");
+  });
+
+  it("Shift+Enter inserts a newline instead of sending", async () => {
+    const user = userEvent.setup();
+    renderInReader();
+    const textarea = screen.getByPlaceholderText(/Ask anything about this paper/i) as HTMLTextAreaElement;
+    await user.type(textarea, "line1");
+    await user.keyboard("{Shift>}{Enter}{/Shift}");
+    await user.type(textarea, "line2");
+
+    const { streamAsk } = await import("@/lib/api");
+    expect(streamAsk).not.toHaveBeenCalled();
+    expect(textarea.value).toBe("line1\nline2");
+  });
+});
