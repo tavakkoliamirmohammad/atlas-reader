@@ -143,7 +143,8 @@ export const useUiStore = create<UiState>()(
         lastHighlightColor: s.lastHighlightColor,
         digestRange: s.digestRange,
         digestCategories: s.digestCategories,
-        chipsCollapsed: s.chipsCollapsed,
+        // chipsCollapsed intentionally NOT persisted — quick actions reopen on
+        // every load for discoverability; users can still collapse per session.
       }),
     },
   ),
