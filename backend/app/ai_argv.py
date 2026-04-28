@@ -6,9 +6,12 @@ atlas-ai-runner share it, so security flags are always set identically.
 
 Invariants enforced here:
 - codex always gets `--sandbox read-only` AND `-c sandbox_mode="read-only"`
-  (double-override against any ambient ~/.codex/config.toml).
-- claude only gets tool access when the caller explicitly passes
-  `enable_read_file`; even then it's Read-only, no Write/Bash/WebFetch.
+  (double-override against any ambient ~/.codex/config.toml). codex has no
+  per-domain network control, so the only safe posture is no network.
+- claude gets `Read` and a *domain-pinned* `WebFetch` (arxiv only) when the
+  caller passes `enable_read_file`. WebFetch is safe to enable here because
+  Claude restricts it to the listed domains — a malicious PDF cannot exfil
+  data to an attacker host. Never Write/Bash, never unrestricted WebFetch.
 - Models pass a shape check only (non-empty, no leading `-`, ≤ MAX_MODEL_LEN
   chars); the CLIs reject unknown slugs themselves with their own errors.
 - Directives are non-empty, must not start with `-`, and on the codex side
@@ -72,7 +75,18 @@ def build_argv(
     if backend == "claude":
         argv = ["claude", *_CLAUDE_STREAM, "--model", model]
         if enable_read_file:
-            argv += ["--allowedTools", "Read"]
+            # Domain-pinned WebFetch lets Claude pull cited arXiv papers /
+            # ar5iv HTML when answering — but Claude refuses any URL outside
+            # the listed hosts, so a prompt-injected PDF can't exfil to an
+            # attacker domain. Never Bash, never Write, never unrestricted
+            # WebFetch.
+            argv += [
+                "--allowedTools",
+                "Read,"
+                "WebFetch(domain:arxiv.org),"
+                "WebFetch(domain:export.arxiv.org),"
+                "WebFetch(domain:ar5iv.labs.arxiv.org)",
+            ]
         if model == "opus" and task == "summarize":
             argv += ["--effort", "max"]
         argv += ["-p", directive]

@@ -221,13 +221,22 @@ def test_codex_argv_uses_double_dash_before_directive():
     assert argv[argv.index("--") + 1] == "Produce summary."
 
 
-def test_claude_argv_restricts_to_read_tool_when_requested():
+def test_claude_argv_restricts_to_read_and_arxiv_pinned_webfetch():
     argv = ai_argv.build_argv(
         backend="claude", task="summarize", model="opus",
         directive="Summarize.", enable_read_file=True,
     )
     assert "--allowedTools" in argv
-    assert argv[argv.index("--allowedTools") + 1] == "Read"
+    tools = argv[argv.index("--allowedTools") + 1]
+    # Read is unconditional; WebFetch is only allowed for arxiv hosts so a
+    # prompt-injected PDF can't exfil to attacker domains. Bash and Write
+    # are NEVER part of this string.
+    assert "Read" in tools
+    assert "WebFetch(domain:arxiv.org)" in tools
+    assert "WebFetch(domain:export.arxiv.org)" in tools
+    assert "WebFetch(domain:ar5iv.labs.arxiv.org)" in tools
+    assert "Bash" not in tools
+    assert "Write" not in tools
 
 
 def test_claude_argv_has_no_tools_when_read_disabled():
