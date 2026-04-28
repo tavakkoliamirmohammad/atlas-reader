@@ -53,4 +53,11 @@ if (typeof window !== "undefined") {
   });
 }
 
+// jsdom doesn't implement Element.scrollIntoView; StreamingMessage and a
+// few sibling components call it on mount. Stub a no-op once globally so
+// individual tests don't have to install the same guard.
+if (typeof Element !== "undefined" && !Element.prototype.scrollIntoView) {
+  Element.prototype.scrollIntoView = function scrollIntoView() {};
+}
+
 afterEach(() => cleanup());

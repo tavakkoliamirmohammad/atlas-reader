@@ -141,6 +141,7 @@ export function PdfPage({
   defaultHighlightColor = "yellow",
 }: Props) {
   const setMode = useUiStore((s) => s.setReadingMode);
+  const jumpToPageRequest = useUiStore((s) => s.jumpToPageRequest);
   const [toolbarVisible, setToolbarVisible] = useState(true);
   const hideTimer = useRef<number | null>(null);
   const cardRef = useRef<HTMLDivElement | null>(null);
@@ -203,6 +204,16 @@ export function PdfPage({
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, []);
+
+  // Bridge the global "jump to page" action (fired from chat link clicks) to
+  // the imperative jumpRef the viewport already exposes. Action-id pattern
+  // means re-clicking the same `[Sec. 4.2 (p.7)](page:7)` link fires every
+  // time even when the page number is identical.
+  useEffect(() => {
+    if (!jumpToPageRequest) return;
+    jumpRef.current?.(jumpToPageRequest.page);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jumpToPageRequest?.id]);
 
   useEffect(() => {
     const card = cardRef.current;

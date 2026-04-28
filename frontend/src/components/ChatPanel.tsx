@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useMatch } from "react-router-dom";
-import { Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, Trash2 } from "lucide-react";
 import {
   type ChatMessage,
   type CodexModelInfo,
@@ -180,6 +180,8 @@ export function ChatPanel() {
   const askRequest = useUiStore((s) => s.askRequest);
   const pinnedQuote = useUiStore((s) => s.pinnedQuote);
   const clearPinnedQuote = useUiStore((s) => s.clearPinnedQuote);
+  const chipsCollapsed = useUiStore((s) => s.chipsCollapsed);
+  const toggleChipsCollapsed = useUiStore((s) => s.toggleChipsCollapsed);
 
   // On paper switch, hydrate the chat from the persisted history for the
   // new paper. The backend writes each turn after streaming completes, so
@@ -349,9 +351,19 @@ export function ChatPanel() {
       <Glossary arxivId={arxivId} />
       <div className="px-3 py-2.5">
         <div className="flex items-center justify-between mb-1.5">
-          <div className="text-[10px] uppercase tracking-wider text-slate-400">
+          <button
+            type="button"
+            onClick={toggleChipsCollapsed}
+            aria-expanded={!chipsCollapsed}
+            aria-controls="chat-quick-actions"
+            title={chipsCollapsed ? "Show quick actions" : "Hide quick actions"}
+            className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wider text-slate-400 hover:text-slate-200 cursor-pointer transition-colors focus-visible:outline-none focus-visible:text-slate-200"
+          >
+            {chipsCollapsed
+              ? <ChevronRight size={11} aria-hidden />
+              : <ChevronDown size={11} aria-hidden />}
             Quick actions
-          </div>
+          </button>
           {messages.length > 0 && (
             <button
               type="button"
@@ -365,20 +377,24 @@ export function ChatPanel() {
             </button>
           )}
         </div>
-        <QuickActionChips
-          onSummarize={summarize}
-          onQuickAsk={quickAsk}
-          disabled={streaming}
-          summarizeElapsedMs={
-            summarizeStartedAt !== null ? nowMs - summarizeStartedAt : null
-          }
-          onListen={handleListen}
-          listenDisabledReason={
-            !tts_available
-              ? "TTS service offline. Run `atlas up` to start it."
-              : undefined
-          }
-        />
+        {!chipsCollapsed && (
+          <div id="chat-quick-actions">
+            <QuickActionChips
+              onSummarize={summarize}
+              onQuickAsk={quickAsk}
+              disabled={streaming}
+              summarizeElapsedMs={
+                summarizeStartedAt !== null ? nowMs - summarizeStartedAt : null
+              }
+              onListen={handleListen}
+              listenDisabledReason={
+                !tts_available
+                  ? "TTS service offline. Run `atlas up` to start it."
+                  : undefined
+              }
+            />
+          </div>
+        )}
       </div>
       <div
         className="flex-1 overflow-y-auto px-3 flex flex-col gap-2"

@@ -1,9 +1,10 @@
 import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import ReactMarkdown, { type Components } from "react-markdown";
+import ReactMarkdown, { defaultUrlTransform, type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import type { AnyModel, ModelChoice } from "@/lib/api";
+import { useUiStore } from "@/stores/ui-store";
 import { MermaidDiagram } from "./MermaidDiagram";
 
 type Props = {
@@ -30,6 +31,11 @@ function pillClass(model: AnyModel): string {
  * MermaidDiagram render. Falls back to the default rendering for every
  * other language. While the response is still streaming we skip Mermaid
  * rendering — partial source fails to parse.
+ *
+ * Also intercept anchors with `page:N` hrefs and turn them into PDF jump
+ * triggers. The chat_system.txt prompt instructs the model to emit
+ * section references as `[Sec. 4.2 (p.7)](page:7)`, which then become
+ * clickable links that scroll the viewer to page 7.
  */
 function markdownComponents(isStreaming: boolean): Components {
   return {
@@ -43,6 +49,27 @@ function markdownComponents(isStreaming: boolean): Components {
         <code className={className} {...props}>
           {children as ReactNode}
         </code>
+      );
+    },
+    a({ href, children, ...props }) {
+      const m = typeof href === "string" ? href.match(/^page:(\d+)$/) : null;
+      if (m) {
+        const page = Number.parseInt(m[1], 10);
+        return (
+          <button
+            type="button"
+            onClick={() => useUiStore.getState().requestJumpToPage(page)}
+            title={`Jump to page ${page}`}
+            className="underline decoration-dotted underline-offset-2 text-[color:var(--ac1)] hover:text-[color:var(--ac1-strong)] cursor-pointer"
+          >
+            {children as ReactNode}
+          </button>
+        );
+      }
+      return (
+        <a href={href} target="_blank" rel="noreferrer" {...props}>
+          {children as ReactNode}
+        </a>
       );
     },
   };
@@ -350,6 +377,11 @@ const StreamedMarkdown = memo(
         <ReactMarkdown
           remarkPlugins={[remarkGfm, remarkMath]}
           rehypePlugins={[rehypeKatex]}
+          // react-markdown's default url sanitizer drops anything outside
+          // a small allow-list (http, https, mailto, tel, …). Our custom
+          // `page:N` scheme would be silently stripped — preserve it here
+          // so the `a` component handler above can do its thing.
+          urlTransform={(url) => (url.startsWith("page:") ? url : defaultUrlTransform(url))}
           components={components}
         >
           {text}

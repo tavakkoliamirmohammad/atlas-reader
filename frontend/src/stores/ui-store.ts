@@ -28,6 +28,8 @@ type UiState = {
   setDigestRange: (r: DigestRange) => void;
   digestCategories: string[];
   setDigestCategories: (cats: string[]) => void;
+  chipsCollapsed: boolean;
+  toggleChipsCollapsed: () => void;
   setBackend: (b: Backend) => void;
   setCodexModel: (m: CodexModel) => void;
   setAppMode: (m: AppMode) => void;
@@ -36,6 +38,8 @@ type UiState = {
   // subscribers fire on each increment via a `useEffect(..., [id])`.
   summarizeRequestId: number;
   askRequest: AskRequest | null;
+  jumpToPageRequest: { id: number; page: number } | null;
+  requestJumpToPage: (page: number) => void;
   pinnedQuote: { text: string; page: number } | null;
   setPinnedQuote: (q: { text: string; page: number }) => void;
   clearPinnedQuote: () => void;
@@ -71,6 +75,9 @@ export const useUiStore = create<UiState>()(
       digestCategories: ["cs.PL", "cs.AR", "cs.DC", "cs.PF", "cs.LG"],
       setDigestCategories: (cats) =>
         set({ digestCategories: Array.from(new Set(cats)) }),
+      chipsCollapsed: false,
+      toggleChipsCollapsed: () =>
+        set((s) => ({ chipsCollapsed: !s.chipsCollapsed })),
       setBackend: (b) => set({ backend: b }),
       setCodexModel: (m) => set({ codexModel: m }),
       setAppMode: (m) => set({ appMode: m, readingMode: m }),
@@ -81,6 +88,11 @@ export const useUiStore = create<UiState>()(
         }),
       summarizeRequestId: 0,
       askRequest: null,
+      jumpToPageRequest: null,
+      requestJumpToPage: (page) =>
+        set((s) => ({
+          jumpToPageRequest: { id: (s.jumpToPageRequest?.id ?? 0) + 1, page },
+        })),
       pinnedQuote: null,
       setPinnedQuote: (q) => set({ pinnedQuote: q }),
       clearPinnedQuote: () => set({ pinnedQuote: null }),
@@ -131,6 +143,7 @@ export const useUiStore = create<UiState>()(
         lastHighlightColor: s.lastHighlightColor,
         digestRange: s.digestRange,
         digestCategories: s.digestCategories,
+        chipsCollapsed: s.chipsCollapsed,
       }),
     },
   ),
