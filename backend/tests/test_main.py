@@ -93,7 +93,7 @@ async def test_digest_endpoint_does_a_live_arxiv_fetch(atlas_data_dir):
     pl = [Paper("pl-1", "T-PL", "A", "x", "cs.PL", "2026-04-21T08:00:00Z")]
     ar = [Paper("ar-1", "T-AR", "A", "x", "cs.AR", "2026-04-22T08:00:00Z")]
     empty: list[Paper] = []
-    fetch = AsyncMock(side_effect=[pl, ar, empty, empty, empty])
+    fetch = AsyncMock(side_effect=[pl, ar, empty, empty])
 
     with patch("app.digest.arxiv.fetch_recent", fetch):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
@@ -103,15 +103,15 @@ async def test_digest_endpoint_does_a_live_arxiv_fetch(atlas_data_dir):
     assert body["count"] == 2
     # Newest first (sorted by published desc).
     assert [p["arxiv_id"] for p in body["papers"]] == ["ar-1", "pl-1"]
-    # Five categories fetched, each as its own awaited call.
-    assert fetch.await_count == 5
+    # Default category list has 4 entries; one awaited call per category.
+    assert fetch.await_count == 4
 
 
 @pytest.mark.asyncio
 async def test_digest_endpoint_dedupes_cross_category_duplicates(atlas_data_dir):
     db.init()
     same = Paper("dup-1", "Cross-listed", "A", "x", "cs.PL", "2026-04-22T08:00:00Z")
-    fetch = AsyncMock(side_effect=[[same], [same], [], [], []])
+    fetch = AsyncMock(side_effect=[[same], [same], [], []])
     with patch("app.digest.arxiv.fetch_recent", fetch):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
             r = await c.get("/api/digest")
@@ -127,7 +127,6 @@ async def test_digest_endpoint_tolerates_partial_fetch_failures(atlas_data_dir):
         RuntimeError("flaky"),
         [survivor],
         RuntimeError("flaky"),
-        [],
         [],
     ])
     with patch("app.digest.arxiv.fetch_recent", fetch):
@@ -148,7 +147,7 @@ async def test_digest_endpoint_classifies_rate_limit_failures(atlas_data_dir):
     db.init()
     fake_resp = _httpx.Response(429, request=_httpx.Request("GET", "http://x"))
     rate_err = _httpx.HTTPStatusError("429", request=fake_resp.request, response=fake_resp)
-    fetch = AsyncMock(side_effect=[rate_err] * 5)
+    fetch = AsyncMock(side_effect=[rate_err] * 4)
     with patch("app.digest.arxiv.fetch_recent", fetch):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
             r = await c.get("/api/digest")
@@ -190,7 +189,7 @@ async def test_digest_endpoint_falls_back_to_defaults_when_cats_blank(atlas_data
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
             r = await c.get("/api/digest?cats=")
     assert r.status_code == 200
-    assert r.json()["categories"] == ["cs.PL", "cs.AR", "cs.DC", "cs.PF", "cs.LG"]
+    assert r.json()["categories"] == ["cs.PL", "cs.AR", "cs.DC", "cs.PF"]
 
 
 @pytest.mark.asyncio

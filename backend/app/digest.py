@@ -14,6 +14,8 @@ exposes ``fresh=true`` as the user's escape hatch.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
+import json
 import logging
 import re
 import time as _time
@@ -22,17 +24,21 @@ from typing import Iterable
 
 import httpx
 
-from app import arxiv
+from app import arxiv, db
 
 
 log = logging.getLogger("atlas.digest")
 
 # Category list defaults / caps. Public so main.py can show them in errors.
-DEFAULT_CATEGORIES: tuple[str, ...] = ("cs.PL", "cs.AR", "cs.DC", "cs.PF", "cs.LG")
+DEFAULT_CATEGORIES: tuple[str, ...] = ("cs.PL", "cs.AR", "cs.DC", "cs.PF")
 MAX_CATEGORIES = 30
 MAX_PER_CATEGORY = 100
 FETCH_TIMEOUT_S = 30.0
-CACHE_TTL_S = 2 * 60 * 60
+# 24h TTL on the persisted SQLite cache. arXiv's per-category submission
+# cadence is daily-ish, so a day-long entry stays useful while keeping
+# every page reload from re-hitting an upstream that throttles aggressively.
+# `?fresh=true` is the user's escape hatch for "I want it now."
+CACHE_TTL_S = 24 * 60 * 60
 # Hard cap on `?days=` so a misbehaving client can't ask for "the last 50000
 # days" and trigger an enormous arXiv query. 90 covers every preset the SPA
 # offers (3 / 7 / 14 / 30) plus headroom.
@@ -44,7 +50,51 @@ MAX_DAYS = 90
 # operators or whitespace into the search query.
 _ARXIV_CAT = re.compile(r"^[a-z][a-z\-]*(\.[A-Z]{2})?$")
 
-_cache: dict[tuple[str, int | None], tuple[float, list[arxiv.Paper]]] = {}
+def _cache_key(cat: str, days: int | None) -> str:
+    return f"{cat}|{days if days is not None else 'all'}"
+
+
+def _papers_to_json(papers: list[arxiv.Paper]) -> str:
+    return json.dumps([dataclasses.asdict(p) for p in papers])
+
+
+def _papers_from_json(payload: str) -> list[arxiv.Paper]:
+    return [arxiv.Paper(**row) for row in json.loads(payload)]
+
+
+def _read_cache(key: str) -> tuple[float, list[arxiv.Paper]] | None:
+    """Pull a (fetched_at, papers) entry for `key` from SQLite, or None."""
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT fetched_at, payload FROM digest_cache WHERE key = ?",
+            (key,),
+        ).fetchone()
+    if row is None:
+        return None
+    try:
+        return float(row[0]), _papers_from_json(row[1])
+    except (json.JSONDecodeError, TypeError) as exc:
+        log.warning("digest cache row %s unreadable, evicting: %s", key, exc)
+        with db.connect() as conn:
+            conn.execute("DELETE FROM digest_cache WHERE key = ?", (key,))
+        return None
+
+
+def _write_cache(key: str, papers: list[arxiv.Paper]) -> None:
+    payload = _papers_to_json(papers)
+    now = _time.time()
+    with db.connect() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO digest_cache (key, fetched_at, payload) "
+            "VALUES (?, ?, ?)",
+            (key, now, payload),
+        )
+
+
+def clear_cache() -> None:
+    """Evict every cached digest row. Used by tests and on schema changes."""
+    with db.connect() as conn:
+        conn.execute("DELETE FROM digest_cache")
 
 
 class InvalidCategory(ValueError):
@@ -139,12 +189,20 @@ def classify_fetch_error(exc: BaseException) -> str:
 
 
 async def _fetch_one(cat: str, *, fresh: bool, days: int | None) -> list[arxiv.Paper]:
-    now = _time.monotonic()
-    cache_key = (cat, days)
+    """Fetch one category, hitting the SQLite cache on the warm path.
+
+    The 24-hour TTL is wall-clock (``time.time``) so it survives container
+    restarts — the user gets the same hits across a `down` / `up` cycle.
+    `fresh=True` bypasses both the read and the freshness check, then
+    overwrites the row with the new payload.
+    """
+    key = _cache_key(cat, days)
     if not fresh:
-        entry = _cache.get(cache_key)
-        if entry and (now - entry[0]) < CACHE_TTL_S:
-            return entry[1]
+        entry = _read_cache(key)
+        if entry is not None:
+            fetched_at, cached = entry
+            if (_time.time() - fetched_at) < CACHE_TTL_S:
+                return cached
     query = f"cat:{cat}"
     if days is not None:
         # Push the date filter to arXiv so we don't fetch and discard hundreds
@@ -154,7 +212,7 @@ async def _fetch_one(cat: str, *, fresh: bool, days: int | None) -> list[arxiv.P
     result = await arxiv.fetch_recent(
         query, max_results=MAX_PER_CATEGORY, timeout=FETCH_TIMEOUT_S,
     )
-    _cache[cache_key] = (now, result)
+    _write_cache(key, result)
     return result
 
 

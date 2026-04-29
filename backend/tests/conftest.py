@@ -20,11 +20,9 @@ def atlas_data_dir(monkeypatch, tmp_path):
     monkeypatch.setenv("ATLAS_DATA_DIR", str(data_dir))
     monkeypatch.delenv("ATLAS_PORT", raising=False)
     monkeypatch.delenv("ATLAS_RUNNER_PORT", raising=False)
-    try:
-        from app import digest as _digest
-        _digest._cache.clear()
-    except Exception:  # pragma: no cover — module may not be importable in some tests
-        pass
+    # The digest cache lives in atlas.db (per-test tmp dir), so it's already
+    # isolated — but a few tests poke the digest module before db.init() has
+    # run. We don't need to do anything here; the SQLite file is fresh per test.
     return data_dir
 
 

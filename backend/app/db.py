@@ -61,6 +61,13 @@ CREATE TABLE IF NOT EXISTS glossary (
     created_at  TEXT DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(arxiv_id, term)
 );
+CREATE TABLE IF NOT EXISTS digest_cache (
+    -- (sorted-categories | days) key — a 7d view of cs.PL,cs.AR is one row.
+    key         TEXT PRIMARY KEY,
+    fetched_at  REAL NOT NULL,           -- unix epoch seconds
+    payload     TEXT NOT NULL            -- JSON-encoded list[Paper]
+);
+
 CREATE INDEX IF NOT EXISTS idx_glossary_arxiv ON glossary(arxiv_id);
 CREATE INDEX IF NOT EXISTS idx_events_ts ON events(ts);
 CREATE INDEX IF NOT EXISTS idx_papers_published ON papers(published);

@@ -59,8 +59,8 @@ export type DigestResponse = {
 // 30d for active categories. Drop the redundant pill.
 export type DigestRange = 3 | 7 | 14 | 30;
 
-async function getJson<T>(path: string): Promise<T> {
-  const res = await fetch(u(path));
+async function getJson<T>(path: string, signal?: AbortSignal): Promise<T> {
+  const res = await fetch(u(path), { signal });
   if (!res.ok) throw new Error(`${path} -> ${res.status}`);
   return res.json() as Promise<T>;
 }
@@ -71,13 +71,14 @@ export const api = {
     categories?: string[],
     fresh: boolean = false,
     days?: DigestRange,
+    signal?: AbortSignal,
   ) => {
     const params = new URLSearchParams();
     if (categories?.length) params.set("cats", categories.join(","));
     if (fresh) params.set("fresh", "true");
     if (days != null) params.set("days", String(days));
     const qs = params.toString();
-    return getJson<DigestResponse>(`/api/digest${qs ? `?${qs}` : ""}`);
+    return getJson<DigestResponse>(`/api/digest${qs ? `?${qs}` : ""}`, signal);
   },
   paper:   (id: string) => getJson<Paper>(`/api/papers/${encodeURIComponent(id)}`),
   pdfUrl:  (id: string) => u(`/api/pdf/${encodeURIComponent(id)}`),

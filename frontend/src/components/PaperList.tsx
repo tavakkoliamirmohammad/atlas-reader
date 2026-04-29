@@ -116,10 +116,17 @@ export function PaperList() {
   // Fetch when the (cats, range) pair has no cached data. Switching back
   // to an already-loaded range is a no-op (instant render). A debounce
   // protects against rapid toggling in the category picker.
+  //
+  // The cleanup function aborts the in-flight network request via
+  // AbortController so a quick range/category switch doesn't pile up
+  // overlapping fetches against the arXiv endpoint (which throttles
+  // aggressively). Without this, holding ↔ on the range strip could
+  // produce N concurrent requests and trip a 429.
   useEffect(() => {
     if (digestCategories.length === 0) return;
     if (cache.has(currentKey)) return;
 
+    const ac = new AbortController();
     let cancelled = false;
     setFetching(true);
     const t = window.setTimeout(async () => {
@@ -127,7 +134,7 @@ export function PaperList() {
         // Send the active range to the backend so the arXiv query scopes
         // to that window — a 3-day filter no longer pulls 100 papers
         // per category just to discard most of them client-side.
-        const res = await api.digest(digestCategories, false, digestRange);
+        const res = await api.digest(digestCategories, false, digestRange, ac.signal);
         if (cancelled) return;
         const o = summarizeFailures(res.failures, res.papers.length);
         setCache((prev) => {
@@ -137,6 +144,9 @@ export function PaperList() {
         });
       } catch (e) {
         if (cancelled) return;
+        // AbortError means the user navigated away mid-flight; drop
+        // it silently rather than showing a "failed" state.
+        if ((e as Error).name === "AbortError") return;
         setCache((prev) => {
           const next = new Map(prev);
           next.set(currentKey, {
@@ -149,7 +159,11 @@ export function PaperList() {
         if (!cancelled) setFetching(false);
       }
     }, 120);
-    return () => { cancelled = true; window.clearTimeout(t); };
+    return () => {
+      cancelled = true;
+      window.clearTimeout(t);
+      ac.abort();
+    };
     // `cache` intentionally not a dep — we only want to refetch on a
     // (cats, range) miss, not on every cache write (that would loop).
     // eslint-disable-next-line react-hooks/exhaustive-deps

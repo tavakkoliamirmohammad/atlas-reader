@@ -70,7 +70,7 @@ export const useUiStore = create<UiState>()(
       lastHighlightColor: "yellow",
       digestRange: 3,
       setDigestRange: (r) => set({ digestRange: r }),
-      digestCategories: ["cs.PL", "cs.AR", "cs.DC", "cs.PF", "cs.LG"],
+      digestCategories: ["cs.PL", "cs.AR", "cs.DC", "cs.PF"],
       setDigestCategories: (cats) =>
         set({ digestCategories: Array.from(new Set(cats)) }),
       chipsCollapsed: false,
@@ -100,17 +100,29 @@ export const useUiStore = create<UiState>()(
     }),
     {
       name: "atlas-ui",
-      version: 3,
+      version: 4,
       storage: createJSONStorage(() => localStorage),
       // v2 dropped the `1d` digest range; v3 drops the `"all"` value
-      // (which behaved identically to 30d under MAX_PER_CATEGORY=100).
-      // Both migrations land users on a sensible window instead of
-      // a gone-or-empty pill after deploy.
+      // (which behaved identically to 30d under MAX_PER_CATEGORY=100);
+      // v4 trims the legacy 5-category default to 4 (cs.LG out). We only
+      // touch users whose persisted set is byte-equal to the old default,
+      // so anyone who customized their list keeps their picks.
       migrate: (persisted: unknown, version) => {
         const p = persisted as Record<string, unknown> | null;
         if (!p) return p as unknown as UiState;
         if (version < 2 && p.digestRange === 1) p.digestRange = 7;
         if (version < 3 && p.digestRange === "all") p.digestRange = 30;
+        if (version < 4) {
+          const cats = p.digestCategories;
+          const legacyDefault = ["cs.PL", "cs.AR", "cs.DC", "cs.PF", "cs.LG"];
+          if (
+            Array.isArray(cats)
+            && cats.length === legacyDefault.length
+            && cats.every((c, i) => c === legacyDefault[i])
+          ) {
+            p.digestCategories = ["cs.PL", "cs.AR", "cs.DC", "cs.PF"];
+          }
+        }
         return p as UiState;
       },
       // chipsCollapsed is the only intentionally non-persisted field — quick

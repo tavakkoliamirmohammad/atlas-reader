@@ -95,7 +95,7 @@ export function CategoryPicker({ selected, onChange }: Props) {
           <div className="px-3 py-2 text-[10px] uppercase tracking-wider text-slate-400 border-b border-white/10">
             arXiv categories
           </div>
-          <ul className="max-h-[260px] overflow-y-auto py-1">
+          <ul className="max-h-[340px] overflow-y-auto py-1.5">
             {CURATED.map(({ code, label }) => {
               const checked = selectedSet.has(code);
               return (
@@ -103,12 +103,12 @@ export function CategoryPicker({ selected, onChange }: Props) {
                   <button
                     type="button"
                     onClick={() => toggle(code)}
-                    className="w-full flex items-center justify-between gap-3 px-3 py-1.5 text-left text-[12px] hover:bg-white/5 transition-colors cursor-pointer"
+                    className="w-full flex items-center justify-between gap-4 px-3.5 py-2.5 text-left text-[12px] hover:bg-white/5 transition-colors cursor-pointer"
                   >
-                    <span className="flex items-center gap-2">
+                    <span className="flex items-center gap-2.5">
                       <span
                         aria-hidden
-                        className={`inline-block h-3 w-3 rounded-sm border ${checked ? "bg-[color:var(--ac1)] border-[color:var(--ac1)]" : "border-white/20"}`}
+                        className={`inline-block h-3.5 w-3.5 rounded-sm border ${checked ? "bg-[color:var(--ac1)] border-[color:var(--ac1)]" : "border-white/20"}`}
                       />
                       <span className="font-mono text-[11px]">{code}</span>
                     </span>
@@ -124,12 +124,12 @@ export function CategoryPicker({ selected, onChange }: Props) {
                   <button
                     type="button"
                     onClick={() => toggle(code)}
-                    className="w-full flex items-center justify-between gap-3 px-3 py-1.5 text-left text-[12px] hover:bg-white/5 transition-colors cursor-pointer"
+                    className="w-full flex items-center justify-between gap-4 px-3.5 py-2.5 text-left text-[12px] hover:bg-white/5 transition-colors cursor-pointer"
                   >
-                    <span className="flex items-center gap-2">
+                    <span className="flex items-center gap-2.5">
                       <span
                         aria-hidden
-                        className="inline-block h-3 w-3 rounded-sm bg-[color:var(--ac1)] border border-[color:var(--ac1)]"
+                        className="inline-block h-3.5 w-3.5 rounded-sm bg-[color:var(--ac1)] border border-[color:var(--ac1)]"
                       />
                       <span className="font-mono text-[11px]">{code}</span>
                     </span>
