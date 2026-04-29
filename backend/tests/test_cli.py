@@ -1,6 +1,6 @@
 """Tests for the Docker-only Atlas CLI.
 
-Covers: argparse surface (new `up`/`down`, removed `start`/`stop`/`restart`),
+Covers: argparse surface (new `up`/`down`/`restart`, removed `start`/`stop`),
 --port / --runner-port flags, port persistence, conflict pre-check, status /
 logs now shelling out to `docker compose`, doctor surfacing both ports.
 """
@@ -17,7 +17,7 @@ from app import cli, port_config
 # ---------- argparse surface ----------
 
 def test_old_native_commands_are_rejected(atlas_data_dir):
-    for cmd in ("start", "stop", "restart"):
+    for cmd in ("start", "stop"):
         with pytest.raises(SystemExit):
             cli.main([cmd])
 
@@ -27,6 +27,32 @@ def test_new_commands_parse(atlas_data_dir):
     with patch("app.cli._have_docker", return_value=False):
         assert cli.main(["up"]) != 0  # errors because docker missing
         assert cli.main(["down"]) == 0  # down is a no-op without docker
+
+
+def test_restart_calls_down_then_up(atlas_data_dir):
+    """`atlas restart` must stop everything before starting it back up,
+    forwarding any port flags it received."""
+    call_order: list[str] = []
+
+    def fake_down(args):
+        call_order.append("down")
+        return 0
+
+    def fake_up(args):
+        call_order.append("up")
+        # Verify the flags propagated through.
+        assert args.port == 9000
+        assert args.runner_port == 9001
+        return 0
+
+    with patch("app.cli.cmd_down", side_effect=fake_down) as mock_down, \
+         patch("app.cli.cmd_up", side_effect=fake_up) as mock_up:
+        rc = cli.main(["restart", "--port", "9000", "--runner-port", "9001"])
+
+    assert rc == 0
+    assert call_order == ["down", "up"]
+    assert mock_down.call_count == 1
+    assert mock_up.call_count == 1
 
 
 def test_runner_commands_still_exist(atlas_data_dir):
