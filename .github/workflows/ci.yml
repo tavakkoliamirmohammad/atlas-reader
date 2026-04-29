@@ -149,10 +149,14 @@ jobs:
               sys.exit(4)
           PY
       - name: Verify /api/health JSON shape
+        # Bash heredoc takes precedence over a pipe — `curl ... | python - <<HEREDOC`
+        # made python read the heredoc as stdin and ignore the curl output. Fetch
+        # via urllib inside python instead.
         run: |
-          curl -sS http://localhost:8765/api/health | python - <<'PY'
-          import json, sys
-          d = json.load(sys.stdin)
+          python - <<'PY'
+          import json, urllib.request
+          with urllib.request.urlopen("http://localhost:8765/api/health", timeout=5) as r:
+              d = json.load(r)
           assert "ai" in d and isinstance(d["ai"], bool), d
           assert "backends" in d and isinstance(d["backends"], dict), d
           for k in ("claude", "codex"):

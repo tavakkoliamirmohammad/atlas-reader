@@ -193,23 +193,30 @@ def _row_to_dict(row) -> dict:
 
 
 @app.get("/api/digest")
-async def get_digest(cats: str | None = None, fresh: bool = False) -> dict:
+async def get_digest(
+    cats: str | None = None,
+    fresh: bool = False,
+    days: str | None = None,
+) -> dict:
     """Live arXiv fetch — every page load is a fresh request.
 
     `cats` is an optional comma-separated list of arXiv category codes
     (e.g. `cs.PL,cs.AR,math.OC`); empty falls back to a curated default
     set in `digest.DEFAULT_CATEGORIES`. `fresh=true` bypasses the
-    per-category in-memory TTL cache. Each page load also kicks the
-    throttled cleanup sweep as a fire-and-forget side effect.
+    per-category in-memory TTL cache. `days=N` (1..MAX_DAYS) constrains
+    the arXiv query to the trailing N-day window so a 3-day filter
+    doesn't pull hundreds of papers we'd just discard client-side. Each
+    page load also kicks the throttled cleanup sweep as a fire-and-forget
+    side effect.
     """
     try:
         categories = digest.parse_categories(cats)
-    except digest.InvalidCategory as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-    except digest.TooManyCategories as exc:
+        days_int = digest.parse_days(days)
+    except (digest.InvalidCategory, digest.TooManyCategories,
+            digest.InvalidDays) as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     asyncio.create_task(asyncio.to_thread(cleanup.sweep))
-    return await digest.build(categories, fresh=fresh)
+    return await digest.build(categories, fresh=fresh, days=days_int)
 
 
 @app.get("/api/papers/{arxiv_id}")

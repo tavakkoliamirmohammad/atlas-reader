@@ -194,6 +194,61 @@ async def test_digest_endpoint_falls_back_to_defaults_when_cats_blank(atlas_data
 
 
 @pytest.mark.asyncio
+async def test_digest_endpoint_passes_days_window_to_arxiv(atlas_data_dir):
+    """`?days=N` adds an arXiv submittedDate range filter so we don't fetch
+    hundreds of papers per category just to drop most of them client-side."""
+    db.init()
+    fetch = AsyncMock(return_value=[])
+    with patch("app.digest.arxiv.fetch_recent", fetch):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            r = await c.get("/api/digest?cats=cs.PL&days=3")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["days"] == 3
+    assert fetch.await_count == 1
+    query = fetch.await_args_list[0].args[0]
+    assert query.startswith("cat:cs.PL AND submittedDate:[")
+
+
+@pytest.mark.asyncio
+async def test_digest_endpoint_omits_date_filter_when_days_absent(atlas_data_dir):
+    """No `?days=` means the SPA wants the full recent slice (the legacy
+    behavior). Query should be just `cat:X`, no submittedDate clause."""
+    db.init()
+    fetch = AsyncMock(return_value=[])
+    with patch("app.digest.arxiv.fetch_recent", fetch):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            r = await c.get("/api/digest?cats=cs.PL")
+    assert r.status_code == 200
+    assert r.json()["days"] is None
+    query = fetch.await_args_list[0].args[0]
+    assert query == "cat:cs.PL"
+
+
+@pytest.mark.asyncio
+async def test_digest_endpoint_caches_per_days_window(atlas_data_dir):
+    """The cache key is (category, days) so a 3-day fetch and a 7-day fetch
+    don't share results — different windows mean different arXiv queries."""
+    db.init()
+    fetch = AsyncMock(return_value=[])
+    with patch("app.digest.arxiv.fetch_recent", fetch):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            await c.get("/api/digest?cats=cs.PL&days=3")
+            await c.get("/api/digest?cats=cs.PL&days=3")  # cache hit
+            await c.get("/api/digest?cats=cs.PL&days=7")  # different window, refetch
+    assert fetch.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_digest_endpoint_rejects_invalid_days(atlas_data_dir):
+    db.init()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        for bad in ("0", "-1", "999", "abc"):
+            r = await c.get(f"/api/digest?cats=cs.PL&days={bad}")
+            assert r.status_code == 400, (bad, r.text)
+
+
+@pytest.mark.asyncio
 async def test_digest_caches_per_category_and_fresh_busts(atlas_data_dir):
     """Second call within TTL is served from cache; ?fresh=true forces a refetch."""
     db.init()

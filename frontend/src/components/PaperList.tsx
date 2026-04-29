@@ -131,7 +131,10 @@ export function PaperList() {
     if (papers.length === 0) setLoading(true);
     const t = window.setTimeout(async () => {
       try {
-        const res = await api.digest(digestCategories);
+        // Send the active range to the backend so the arXiv query scopes
+        // to that window — a 3-day filter no longer pulls 100 papers
+        // per category just to discard most of them client-side.
+        const res = await api.digest(digestCategories, false, digestRange);
         if (cancelled) return;
         setPapers(res.papers);
         setOutcome(summarizeFailures(res.failures, res.papers.length));
@@ -148,7 +151,7 @@ export function PaperList() {
     }, 120);
     return () => { cancelled = true; window.clearTimeout(t); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [refreshTick, digestCategories]);
+  }, [refreshTick, digestCategories, digestRange]);
 
   // Clear any pending "refresh info" flash on unmount so the timer doesn't
   // fire after the component is gone.

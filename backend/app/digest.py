@@ -17,6 +17,7 @@ import asyncio
 import logging
 import re
 import time as _time
+from datetime import datetime, timedelta, timezone
 from typing import Iterable
 
 import httpx
@@ -32,6 +33,10 @@ MAX_CATEGORIES = 30
 MAX_PER_CATEGORY = 100
 FETCH_TIMEOUT_S = 30.0
 CACHE_TTL_S = 2 * 60 * 60
+# Hard cap on `?days=` so a misbehaving client can't ask for "the last 50000
+# days" and trigger an enormous arXiv query. 90 covers every preset the SPA
+# offers (3 / 7 / 14 / 30) plus headroom.
+MAX_DAYS = 90
 
 # arXiv category codes look like ``cs.PL``, ``math.OC``, ``stat.ML``, or bare
 # archive prefixes like ``physics`` / ``q-bio``. This regex is permissive
@@ -39,7 +44,7 @@ CACHE_TTL_S = 2 * 60 * 60
 # operators or whitespace into the search query.
 _ARXIV_CAT = re.compile(r"^[a-z][a-z\-]*(\.[A-Z]{2})?$")
 
-_cache: dict[str, tuple[float, list[arxiv.Paper]]] = {}
+_cache: dict[tuple[str, int | None], tuple[float, list[arxiv.Paper]]] = {}
 
 
 class InvalidCategory(ValueError):
@@ -48,6 +53,32 @@ class InvalidCategory(ValueError):
 
 class TooManyCategories(ValueError):
     """User passed more than ``MAX_CATEGORIES`` categories."""
+
+
+class InvalidDays(ValueError):
+    """``?days=`` was non-positive or above ``MAX_DAYS``."""
+
+
+def parse_days(raw: str | None) -> int | None:
+    """Validate ``?days=N`` (None / blank means no time-window filter)."""
+    if raw is None or not raw.strip():
+        return None
+    try:
+        n = int(raw)
+    except ValueError as exc:
+        raise InvalidDays(f"days must be an integer, got {raw!r}") from exc
+    if n <= 0 or n > MAX_DAYS:
+        raise InvalidDays(f"days must be 1..{MAX_DAYS}, got {n}")
+    return n
+
+
+def _date_window_clause(days: int) -> str:
+    """Build the arXiv ``submittedDate:[start TO end]`` filter for the last
+    ``days`` days. arXiv expects ``YYYYMMDDHHMM`` in UTC."""
+    end = datetime.now(timezone.utc)
+    start = end - timedelta(days=days)
+    fmt = "%Y%m%d%H%M"
+    return f"submittedDate:[{start.strftime(fmt)} TO {end.strftime(fmt)}]"
 
 
 def parse_categories(raw: str | None) -> tuple[str, ...]:
@@ -107,29 +138,44 @@ def classify_fetch_error(exc: BaseException) -> str:
     return type(exc).__name__
 
 
-async def _fetch_one(cat: str, *, fresh: bool) -> list[arxiv.Paper]:
+async def _fetch_one(cat: str, *, fresh: bool, days: int | None) -> list[arxiv.Paper]:
     now = _time.monotonic()
+    cache_key = (cat, days)
     if not fresh:
-        entry = _cache.get(cat)
+        entry = _cache.get(cache_key)
         if entry and (now - entry[0]) < CACHE_TTL_S:
             return entry[1]
+    query = f"cat:{cat}"
+    if days is not None:
+        # Push the date filter to arXiv so we don't fetch and discard hundreds
+        # of papers we'd then drop client-side. With a 3-day window most
+        # categories return well under MAX_PER_CATEGORY, often 5–30 papers.
+        query = f"{query} AND {_date_window_clause(days)}"
     result = await arxiv.fetch_recent(
-        f"cat:{cat}", max_results=MAX_PER_CATEGORY, timeout=FETCH_TIMEOUT_S,
+        query, max_results=MAX_PER_CATEGORY, timeout=FETCH_TIMEOUT_S,
     )
-    _cache[cat] = (now, result)
+    _cache[cache_key] = (now, result)
     return result
 
 
-async def build(categories: Iterable[str], *, fresh: bool) -> dict:
+async def build(
+    categories: Iterable[str], *, fresh: bool, days: int | None = None,
+) -> dict:
     """Run the per-category fan-out and return the JSON-ready dict.
 
     Partial failures are tolerated; whatever came back is returned. The
     failure list lets the SPA show a per-category warning without losing
     the categories that did succeed.
+
+    ``days`` (when set) constrains the arXiv search to the trailing N-day
+    window. Without it, we fetch up to ``MAX_PER_CATEGORY`` recent papers
+    per category and the SPA filters client-side — fine for "all-time"
+    but expensive when the user only wanted the last 3 days.
     """
     cats = tuple(categories)
     results = await asyncio.gather(
-        *(_fetch_one(c, fresh=fresh) for c in cats), return_exceptions=True,
+        *(_fetch_one(c, fresh=fresh, days=days) for c in cats),
+        return_exceptions=True,
     )
     seen: dict[str, arxiv.Paper] = {}
     failures: list[dict] = []
@@ -147,4 +193,5 @@ async def build(categories: Iterable[str], *, fresh: bool) -> dict:
         "papers": [paper_to_dict(p) for p in items],
         "categories": list(cats),
         "failures": failures,
+        "days": days,
     }
