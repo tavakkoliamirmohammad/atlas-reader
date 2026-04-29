@@ -1,11 +1,20 @@
 import pytest
-from unittest.mock import AsyncMock, patch
+from contextlib import asynccontextmanager
+from unittest.mock import patch
 
 from app import db, papers, summarizer
 from app.arxiv import Paper
 
 
 SAMPLE = Paper("9", "T", "A", "x", "cs.PL", "2026-04-19T08:00:00Z")
+
+
+def _stub_pdf(path: str = "/tmp/9.pdf"):
+    """Patch the per-call temp-PDF context manager to yield a fixed path."""
+    @asynccontextmanager
+    async def _fake(_arxiv_id):
+        yield path
+    return patch("app.summarizer.pdf_fetch.paper_pdf_for_ai", _fake)
 
 
 @pytest.mark.asyncio
@@ -18,9 +27,8 @@ async def test_summarize_yields_chunks(atlas_data_dir):
         yield "blah\n"
         yield "## 2. Problem\n"
 
-    with patch("app.summarizer.pdf_cache.ensure_cached", new=AsyncMock()):
-        with patch("app.summarizer.ai_backend.run_ai", _fake):
-            chunks = [c async for c in summarizer.summarize("9")]
+    with _stub_pdf(), patch("app.summarizer.ai_backend.run_ai", _fake):
+        chunks = [c async for c in summarizer.summarize("9")]
 
     assert chunks == ["## 1. Background\n", "blah\n", "## 2. Problem\n"]
 
@@ -35,11 +43,9 @@ async def test_summarize_uses_summarize_task(atlas_data_dir):
         captured.update(kwargs)
         yield ""
 
-    with patch("app.summarizer.pdf_cache.ensure_cached",
-               new=AsyncMock(return_value="/tmp/9.pdf")):
-        with patch("app.summarizer.ai_backend.run_ai", _capture):
-            async for _ in summarizer.summarize("9"):
-                pass
+    with _stub_pdf("/tmp/9.pdf"), patch("app.summarizer.ai_backend.run_ai", _capture):
+        async for _ in summarizer.summarize("9"):
+            pass
 
     assert captured["task"] == "summarize"
     assert captured["directive"] == "Produce the deep summary."
@@ -66,10 +72,9 @@ async def test_summarize_passes_model_arg(atlas_data_dir):
         captured.update(kwargs)
         yield ""
 
-    with patch("app.summarizer.pdf_cache.ensure_cached", new=AsyncMock(return_value="/tmp/9.pdf")):
-        with patch("app.summarizer.ai_backend.run_ai", _capture):
-            async for _ in summarizer.summarize("9", backend="claude", model="haiku"):
-                pass
+    with _stub_pdf(), patch("app.summarizer.ai_backend.run_ai", _capture):
+        async for _ in summarizer.summarize("9", backend="claude", model="haiku"):
+            pass
 
     assert captured["backend"] == "claude"
     assert captured["model"] == "haiku"
@@ -85,9 +90,8 @@ async def test_summarize_defaults_to_codex_backend(atlas_data_dir):
         captured.update(kwargs)
         yield ""
 
-    with patch("app.summarizer.pdf_cache.ensure_cached", new=AsyncMock(return_value="/tmp/9.pdf")):
-        with patch("app.summarizer.ai_backend.run_ai", _capture):
-            async for _ in summarizer.summarize("9"):
-                pass
+    with _stub_pdf(), patch("app.summarizer.ai_backend.run_ai", _capture):
+        async for _ in summarizer.summarize("9"):
+            pass
 
     assert captured["backend"] == "codex"

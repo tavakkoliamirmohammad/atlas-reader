@@ -191,6 +191,51 @@ def test_read_path_inside_data_dir_is_accepted(client, tmp_path, monkeypatch):
     assert r.status_code == 200
 
 
+def test_read_path_symlink_to_runner_secret_is_rejected(client, tmp_path):
+    """A symlink under pdfs/ pointing at runner.secret resolves into the data
+    dir but escapes the pdfs/ subtree — must be rejected so the AI's `Read`
+    tool can never exfiltrate the bearer token through a planted symlink."""
+    secret = tmp_path / "runner.secret"
+    secret.write_text("super-secret")
+    (tmp_path / "pdfs").mkdir(exist_ok=True)
+    evil = tmp_path / "pdfs" / "evil.pdf"
+    evil.symlink_to(secret)
+    r = client.post(
+        "/run",
+        json=_valid_payload(enable_read_file=str(evil)),
+        headers=_auth(),
+    )
+    assert r.status_code == 422
+
+
+def test_read_path_in_tmp_subdir_is_accepted(client, tmp_path, monkeypatch):
+    """Ephemeral arXiv PDF downloads land under ATLAS_DATA_DIR/tmp/."""
+    monkeypatch.setattr(runner_main, "_run_job", _fake_run_job)
+    tmp_pdf = tmp_path / "tmp" / "2401.12345.pdf"
+    tmp_pdf.parent.mkdir(exist_ok=True)
+    tmp_pdf.write_bytes(b"%PDF-1.4 fake")
+    r = client.post(
+        "/run",
+        json=_valid_payload(enable_read_file=str(tmp_pdf)),
+        headers=_auth(),
+    )
+    assert r.status_code == 200
+
+
+def test_read_path_at_data_root_is_rejected(client, tmp_path):
+    """ATLAS_DATA_DIR itself contains runner.secret / runner.env / atlas.db.
+    Even an absolute path that lives inside the data dir but outside pdfs/tmp
+    must be rejected."""
+    target = tmp_path / "runner.secret"
+    target.write_text("nope")
+    r = client.post(
+        "/run",
+        json=_valid_payload(enable_read_file=str(target)),
+        headers=_auth(),
+    )
+    assert r.status_code == 422
+
+
 # ---------- argv snapshots (hardening invariants) ----------
 
 def test_codex_argv_always_has_read_only_sandbox():

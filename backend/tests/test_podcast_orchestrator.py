@@ -11,6 +11,7 @@ import io
 import json
 import shutil
 import wave
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import AsyncIterator
 from unittest.mock import AsyncMock
@@ -132,10 +133,11 @@ async def test_happy_path(monkeypatch, tmp_path):
 
     monkeypatch.setattr("app.papers.get", lambda _: object())
 
-    async def fake_ensure_cached(arxiv_id: str) -> Path:
-        return fake_pdf
+    @asynccontextmanager
+    async def fake_pdf_for_ai(arxiv_id: str):
+        yield fake_pdf
 
-    monkeypatch.setattr("app.pdf_cache.ensure_cached", fake_ensure_cached)
+    monkeypatch.setattr("app.pdf_fetch.paper_pdf_for_ai", fake_pdf_for_ai)
 
     async def fake_run_ai(**kwargs) -> AsyncIterator[str]:
         for chunk in ["First sentence. ", "Second sentence."]:
@@ -192,10 +194,11 @@ async def test_empty_script_emits_error(monkeypatch, tmp_path):
 
     monkeypatch.setattr("app.papers.get", lambda _: object())
 
-    async def fake_ensure_cached(_) -> Path:
-        return fake_pdf
+    @asynccontextmanager
+    async def fake_pdf_for_ai(_arxiv_id: str):
+        yield fake_pdf
 
-    monkeypatch.setattr("app.pdf_cache.ensure_cached", fake_ensure_cached)
+    monkeypatch.setattr("app.pdf_fetch.paper_pdf_for_ai", fake_pdf_for_ai)
 
     async def fake_run_ai(**kwargs) -> AsyncIterator[str]:
         yield ""
@@ -225,10 +228,11 @@ async def test_tts_failure_mid_stream_cleans_up(monkeypatch, tmp_path):
 
     monkeypatch.setattr("app.papers.get", lambda _: object())
 
-    async def fake_ensure_cached(_) -> Path:
-        return fake_pdf
+    @asynccontextmanager
+    async def fake_pdf_for_ai(_arxiv_id: str):
+        yield fake_pdf
 
-    monkeypatch.setattr("app.pdf_cache.ensure_cached", fake_ensure_cached)
+    monkeypatch.setattr("app.pdf_fetch.paper_pdf_for_ai", fake_pdf_for_ai)
 
     async def fake_run_ai(**kwargs) -> AsyncIterator[str]:
         yield "First sentence. Second sentence."
@@ -274,10 +278,11 @@ async def test_lock_serializes_concurrent_calls(monkeypatch, tmp_path):
 
     monkeypatch.setattr("app.papers.get", lambda _: object())
 
-    async def fake_ensure_cached(_) -> Path:
-        return fake_pdf
+    @asynccontextmanager
+    async def fake_pdf_for_ai(_arxiv_id: str):
+        yield fake_pdf
 
-    monkeypatch.setattr("app.pdf_cache.ensure_cached", fake_ensure_cached)
+    monkeypatch.setattr("app.pdf_fetch.paper_pdf_for_ai", fake_pdf_for_ai)
 
     ai_call_count = 0
 

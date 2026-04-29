@@ -52,24 +52,33 @@ export type DigestResponse = {
 
 // Defined here (not imported from the ui-store) to avoid a circular import:
 // ui-store.ts imports `HighlightColor` + `ModelChoice` from this module.
-// Used purely for client-side range filtering — the backend always returns
-// the full live arXiv fetch and the SPA filters by `published` itself.
-export type DigestRange = 3 | 7 | 14 | 30 | "all";
+// `DigestRange` doubles as the client-side filter window AND the
+// `?days=` value we send to the backend so it scopes the arXiv query
+// itself. `1` is the default — most reading sessions are about
+// catching up on today's announcements; the wider windows are for
+// "what did I miss" passes.
+export type DigestRange = 1 | 3 | 7 | 14 | 30;
 
-async function getJson<T>(path: string): Promise<T> {
-  const res = await fetch(u(path));
+async function getJson<T>(path: string, signal?: AbortSignal): Promise<T> {
+  const res = await fetch(u(path), { signal });
   if (!res.ok) throw new Error(`${path} -> ${res.status}`);
   return res.json() as Promise<T>;
 }
 
 export const api = {
   health:  () => getJson<HealthResponse>("/api/health"),
-  digest:  (categories?: string[], fresh: boolean = false) => {
+  digest:  (
+    categories?: string[],
+    fresh: boolean = false,
+    days?: DigestRange,
+    signal?: AbortSignal,
+  ) => {
     const params = new URLSearchParams();
     if (categories?.length) params.set("cats", categories.join(","));
     if (fresh) params.set("fresh", "true");
+    if (days != null) params.set("days", String(days));
     const qs = params.toString();
-    return getJson<DigestResponse>(`/api/digest${qs ? `?${qs}` : ""}`);
+    return getJson<DigestResponse>(`/api/digest${qs ? `?${qs}` : ""}`, signal);
   },
   paper:   (id: string) => getJson<Paper>(`/api/papers/${encodeURIComponent(id)}`),
   pdfUrl:  (id: string) => u(`/api/pdf/${encodeURIComponent(id)}`),

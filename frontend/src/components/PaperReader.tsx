@@ -19,6 +19,7 @@ import {
   type SelectionRect,
 } from "@/lib/api";
 import { useUiStore } from "@/stores/ui-store";
+import { useUiActionsStore } from "@/stores/ui-actions-store";
 import { PdfPage } from "./PdfPage";
 import type { HighlightWithPosition, SelectionPayload } from "./PdfViewport";
 
@@ -68,7 +69,7 @@ export function PaperReader({ arxivId }: Props) {
   const mode = useUiStore((s) => s.readingMode);
   const defaultHighlightColor = useUiStore((s) => s.lastHighlightColor);
   const setLastHighlightColor = useUiStore((s) => s.setLastHighlightColor);
-  const setPinnedQuote = useUiStore((s) => s.setPinnedQuote);
+  const setPinnedQuote = useUiActionsStore((s) => s.setPinnedQuote);
   const [items, setItems] = useState<Highlight[]>([]);
   const [selection, setSelection] = useState<SelectionPayload | null>(null);
   const jumpRef = useRef<((pageNumber: number) => void) | null>(null);

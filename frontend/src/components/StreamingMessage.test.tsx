@@ -2,12 +2,12 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { StreamingMessage } from "./StreamingMessage";
-import { useUiStore } from "@/stores/ui-store";
+import { useUiActionsStore } from "@/stores/ui-actions-store";
 
 describe("StreamingMessage page-link interceptor", () => {
   it("renders [Sec. 4.2 (p.7)](page:7) as a button that jumps the viewer", async () => {
     const user = userEvent.setup();
-    const requestSpy = vi.spyOn(useUiStore.getState(), "requestJumpToPage");
+    const requestSpy = vi.spyOn(useUiActionsStore.getState(), "requestJumpToPage");
 
     render(
       <StreamingMessage

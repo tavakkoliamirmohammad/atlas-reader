@@ -605,7 +605,7 @@ export function PdfViewport({
   return (
     <div
       ref={containerRef}
-      className="w-full h-full overflow-auto"
+      className="relative w-full h-full overflow-auto"
       style={{
         // Apply theming via CSS filter — same as the previous iframe approach
         // so Light/Sepia/Dark color logic is preserved verbatim.
@@ -613,6 +613,19 @@ export function PdfViewport({
         transition: "filter .25s ease",
       }}
     >
+      {/* Centered initial-fetch loader. Lives at the OUTER container level
+          (not inside the inner positioning surface) because that surface
+          has `height: totalHeight` which is 0 while loading — an
+          `absolute inset-0` child of a zero-height parent paints nothing. */}
+      {loading && pages.length === 0 && (
+        <div
+          className="absolute inset-0 flex items-center justify-center pointer-events-none px-6 z-20"
+          aria-live="polite"
+        >
+          <InitialPdfLoadingCard phase={loadPhase} />
+        </div>
+      )}
+
       {/* Inner positioning surface: total document height so virtualized pages
           can be absolutely positioned and scrollbar reflects the full doc. */}
       <div
@@ -683,10 +696,9 @@ export function PdfViewport({
           </div>
         ))}
 
-        {/* Loading overlay — richer card with download progress + phase.
-            Gate visibility on a delay+min-duration so sub-150ms loads don't
-            flash, and once shown the card stays for at least 450ms so the
-            slide-up animation is perceivable. */}
+        {/* Bottom progress card — richer, with download progress + phase.
+            Visible during parsing / page prep, when the centered card has
+            already faded out and page placeholders are filling the area. */}
         <GatedLoadingCard loading={loading} phase={loadPhase} />
 
         {/* Error overlay. */}
@@ -757,6 +769,100 @@ function GatedLoadingCard({ loading, phase }: { loading: boolean; phase: LoadPha
 
   if (!visible) return null;
   return <LoadingCard phase={phase} />;
+}
+
+
+/**
+ * Centered initial-fetch loader. Shown only while the first PDF download is
+ * in flight and no pages have been laid out yet — i.e. the viewport is
+ * otherwise empty and the bottom progress card is too easy to miss. As soon
+ * as parsing starts and placeholders fill the viewport, this fades out and
+ * the bottom card carries the rest of the loading story.
+ *
+ * No show-delay gate here: this is the *only* signal the user has during
+ * the initial download (now that arXiv PDFs aren't disk-cached, every open
+ * is a real network round trip), so any delay is wasted attention.
+ */
+function InitialPdfLoadingCard({ phase }: { phase: LoadPhase }) {
+  let detail: string | null = null;
+  let pct: number | null = null;
+  let title = "Downloading PDF";
+  let indeterminate = true;
+
+  if (phase.kind === "fetching") {
+    if (phase.total > 0) {
+      const ratio = Math.max(0, Math.min(1, phase.loaded / phase.total));
+      pct = Math.round(ratio * 100);
+      detail = `${formatBytes(phase.loaded)} of ${formatBytes(phase.total)}`;
+      indeterminate = false;
+    } else if (phase.loaded > 0) {
+      detail = formatBytes(phase.loaded);
+    }
+  } else if (phase.kind === "parsing") {
+    title = "Parsing document";
+  } else if (phase.kind === "layout") {
+    title = "Preparing pages";
+    if (phase.total > 0) {
+      pct = Math.round((phase.done / phase.total) * 100);
+      detail = `${phase.done} of ${phase.total} pages`;
+      indeterminate = false;
+    }
+  }
+
+  return (
+    <div
+      className="flex flex-col items-center gap-4 w-full max-w-[360px] text-center px-6 py-5 rounded-2xl"
+      role="status"
+      style={{
+        // High-contrast card so the user actually sees it against any
+        // viewport background — the previous version was just floating
+        // text on the empty PDF area, which faded into the surroundings.
+        background: "var(--surface-overlay)",
+        border: "1px solid var(--ac1-mid)",
+        color: "var(--surface-overlay-text)",
+        backdropFilter: "blur(12px)",
+        boxShadow: "0 20px 40px -12px rgba(0,0,0,0.35), 0 0 0 1px var(--ac1-mid)",
+      }}
+    >
+      <Loader2
+        size={40}
+        className="animate-spin"
+        style={{ color: "var(--ac1)" }}
+        aria-hidden
+      />
+      <div className="flex flex-col gap-1">
+        <div className="text-[14px] font-semibold tracking-tight">
+          {title}{pct !== null ? ` · ${pct}%` : ""}
+        </div>
+        <div className="text-[11px] opacity-70 min-h-[1em]">
+          {detail ?? "Streaming from arxiv.org…"}
+        </div>
+      </div>
+      <div
+        className="h-1.5 w-full overflow-hidden rounded-full"
+        style={{ background: "var(--surface-overlay-border)" }}
+      >
+        {indeterminate ? (
+          <div
+            className="h-full rounded-full pdf-loading-indeterminate"
+            style={{
+              width: "40%",
+              background:
+                "linear-gradient(90deg, transparent, var(--ac1) 50%, transparent)",
+            }}
+          />
+        ) : (
+          <div
+            className="h-full rounded-full transition-[width] duration-150"
+            style={{
+              width: `${pct ?? 0}%`,
+              background: "var(--ac1)",
+            }}
+          />
+        )}
+      </div>
+    </div>
+  );
 }
 
 

@@ -71,3 +71,111 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           platforms: linux/amd64
+
+  integration-linux:
+    # Smoke-test the two-process architecture on native Linux Docker. The
+    # backend container has to reach the host runner via host.docker.internal,
+    # which only works on Linux when (a) compose has extra_hosts:host-gateway
+    # and (b) the runner binds 0.0.0.0 (loopback isn't reachable from the
+    # bridge gateway IP). This job catches regressions in either piece.
+    # No claude/codex CLIs are installed — we only verify the network triangle.
+    name: Linux integration smoke
+    needs: [backend, frontend]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - name: Install backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      - name: Generate runner secret + env
+        run: |
+          mkdir -p "$HOME/.atlas"
+          python -c "from app import secret_store; secret_store.ensure()"
+          test -s "$HOME/.atlas/runner.secret"
+          grep -q "^ATLAS_AI_SECRET=" "$HOME/.atlas/runner.env"
+      - name: Start AI runner on host
+        run: |
+          nohup python -m app.runner_main \
+            > "$HOME/.atlas/atlas-runner.log" 2>&1 &
+          echo $! > "$HOME/.atlas/atlas-runner.pid"
+          for i in $(seq 1 30); do
+            if (exec 3<>/dev/tcp/127.0.0.1/8766) 2>/dev/null; then
+              exec 3<&-; exec 3>&-
+              echo "runner up"; exit 0
+            fi
+            sleep 0.5
+          done
+          echo "runner failed to start"; cat "$HOME/.atlas/atlas-runner.log"; exit 1
+      - name: Bring up compose stack
+        run: docker compose up --build -d
+      - name: Wait for backend health
+        run: |
+          for i in $(seq 1 60); do
+            CODE=$(curl -sS -o /dev/null -w '%{http_code}' \
+              http://localhost:8765/api/health || echo 000)
+            if [ "$CODE" = "200" ]; then echo "backend healthy"; exit 0; fi
+            sleep 1
+          done
+          echo "backend never became healthy"
+          docker compose logs atlas
+          exit 1
+      - name: Verify container can reach host runner
+        # 401 = DNS + TCP + HTTP worked, runner rejected missing bearer.
+        # Anything else (connection refused, NXDOMAIN) = Linux plumbing regressed.
+        run: |
+          docker compose exec -T atlas python - <<'PY'
+          import sys, urllib.request, urllib.error
+          url = "http://host.docker.internal:8766/health"
+          try:
+              urllib.request.urlopen(url, timeout=5)
+              print("UNEXPECTED 2xx - runner accepted unauthenticated request")
+              sys.exit(2)
+          except urllib.error.HTTPError as e:
+              if e.code == 401:
+                  print(f"OK: runner returned 401 from {url}")
+                  sys.exit(0)
+              print(f"UNEXPECTED status {e.code} from {url}")
+              sys.exit(3)
+          except Exception as e:
+              print(f"FAIL: container cannot reach runner: {e!r}")
+              sys.exit(4)
+          PY
+      - name: Verify /api/health JSON shape
+        # Bash heredoc takes precedence over a pipe — `curl ... | python - <<HEREDOC`
+        # made python read the heredoc as stdin and ignore the curl output. Fetch
+        # via urllib inside python instead.
+        run: |
+          python - <<'PY'
+          import json, urllib.request
+          with urllib.request.urlopen("http://localhost:8765/api/health", timeout=5) as r:
+              d = json.load(r)
+          assert "ai" in d and isinstance(d["ai"], bool), d
+          assert "backends" in d and isinstance(d["backends"], dict), d
+          for k in ("claude", "codex"):
+              assert k in d["backends"], d
+          assert d["backends"]["claude"] is False, d
+          assert d["backends"]["codex"] is False, d
+          print("health shape OK:", json.dumps(d))
+          PY
+      - name: Dump logs on failure
+        if: failure()
+        run: |
+          echo "=== runner log ==="
+          cat "$HOME/.atlas/atlas-runner.log" || true
+          echo "=== compose logs ==="
+          docker compose logs || true
+      - name: Tear down
+        if: always()
+        run: |
+          docker compose down -v || true
+          if [ -f "$HOME/.atlas/atlas-runner.pid" ]; then
+            kill "$(cat "$HOME/.atlas/atlas-runner.pid")" 2>/dev/null || true
+          fi

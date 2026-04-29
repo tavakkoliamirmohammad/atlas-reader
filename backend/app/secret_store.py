@@ -24,6 +24,7 @@ import secrets
 from pathlib import Path
 
 from app import db, port_config
+from app.fs_util import atomic_write_0o600
 
 
 def _secret_path() -> Path:
@@ -57,12 +58,12 @@ def ensure() -> str:
     token = secrets.token_urlsafe(32)
 
     # runner.secret: atomic-permissioned write.
-    port_config.atomic_write_0o600(_secret_path(), token)
+    atomic_write_0o600(_secret_path(), token)
 
     # runner.env: preserve other keys, upsert ATLAS_AI_SECRET, atomic write.
     pairs = port_config.read_env_file()
     pairs["ATLAS_AI_SECRET"] = token
     body = "".join(f"{k}={v}\n" for k, v in pairs.items())
-    port_config.atomic_write_0o600(_env_path(), body)
+    atomic_write_0o600(_env_path(), body)
 
     return token

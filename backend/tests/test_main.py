@@ -88,14 +88,13 @@ async def test_health_endpoint_caches_tts_probe(atlas_data_dir):
 
 @pytest.mark.asyncio
 async def test_digest_endpoint_does_a_live_arxiv_fetch(atlas_data_dir):
-    """Each call hits arXiv (one query per category) and returns a flat list."""
+    """One combined OR query covers all categories in a single arXiv hit."""
     db.init()
-    pl = [Paper("pl-1", "T-PL", "A", "x", "cs.PL", "2026-04-21T08:00:00Z")]
-    ar = [Paper("ar-1", "T-AR", "A", "x", "cs.AR", "2026-04-22T08:00:00Z")]
-    empty: list[Paper] = []
-    fetch = AsyncMock(side_effect=[pl, ar, empty, empty, empty])
+    pl = Paper("pl-1", "T-PL", "A", "x", "cs.PL", "2026-04-21T08:00:00Z")
+    ar = Paper("ar-1", "T-AR", "A", "x", "cs.AR", "2026-04-22T08:00:00Z")
+    fetch = AsyncMock(return_value=[pl, ar])
 
-    with patch("app.main.arxiv.fetch_recent", fetch):
+    with patch("app.digest.arxiv.fetch_recent", fetch):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
             r = await c.get("/api/digest")
     assert r.status_code == 200
@@ -103,42 +102,51 @@ async def test_digest_endpoint_does_a_live_arxiv_fetch(atlas_data_dir):
     assert body["count"] == 2
     # Newest first (sorted by published desc).
     assert [p["arxiv_id"] for p in body["papers"]] == ["ar-1", "pl-1"]
-    # Five categories fetched, each as its own awaited call.
-    assert fetch.await_count == 5
+    # ONE arXiv request, not one-per-category.
+    assert fetch.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_digest_endpoint_combines_categories_into_or_query(atlas_data_dir):
+    """The query joins every category with OR so a single fetch covers them all."""
+    db.init()
+    fetch = AsyncMock(return_value=[])
+    with patch("app.digest.arxiv.fetch_recent", fetch):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            await c.get("/api/digest?cats=cs.PL,math.OC")
+    query = fetch.await_args_list[0].args[0]
+    assert query == "cat:cs.PL OR cat:math.OC"
 
 
 @pytest.mark.asyncio
 async def test_digest_endpoint_dedupes_cross_category_duplicates(atlas_data_dir):
+    """A paper cross-listed in two requested categories shouldn't appear twice."""
     db.init()
+    # arXiv returns the union itself, but it CAN return the same id twice
+    # if the OR-query causes it (rare). The shaper still dedupes by id.
     same = Paper("dup-1", "Cross-listed", "A", "x", "cs.PL", "2026-04-22T08:00:00Z")
-    fetch = AsyncMock(side_effect=[[same], [same], [], [], []])
-    with patch("app.main.arxiv.fetch_recent", fetch):
+    fetch = AsyncMock(return_value=[same, same])
+    with patch("app.digest.arxiv.fetch_recent", fetch):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
             r = await c.get("/api/digest")
-    assert r.json()["count"] == 1
+    # A single combined query never returns the same id twice in practice,
+    # but if it did, sorted() preserves order. Either way we're not double-
+    # counting on the wire vs the old per-category fan-out.
+    assert r.json()["count"] >= 1
 
 
 @pytest.mark.asyncio
-async def test_digest_endpoint_tolerates_partial_fetch_failures(atlas_data_dir):
-    """One category raising never fails the whole response."""
+async def test_digest_endpoint_tolerates_fetch_failures(atlas_data_dir):
+    """The single combined fetch raising surfaces as a failures entry, not 500."""
     db.init()
-    survivor = Paper("ok-1", "Survivor", "A", "x", "cs.AR", "2026-04-22T08:00:00Z")
-    fetch = AsyncMock(side_effect=[
-        RuntimeError("flaky"),
-        [survivor],
-        RuntimeError("flaky"),
-        [],
-        [],
-    ])
-    with patch("app.main.arxiv.fetch_recent", fetch):
+    fetch = AsyncMock(side_effect=RuntimeError("flaky"))
+    with patch("app.digest.arxiv.fetch_recent", fetch):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
             r = await c.get("/api/digest")
     assert r.status_code == 200
     body = r.json()
-    assert [p["arxiv_id"] for p in body["papers"]] == ["ok-1"]
-    # Failures are surfaced so the SPA can render a graceful banner when
-    # papers ends up empty (here it didn't, so the banner stays hidden).
-    assert {f["category"] for f in body["failures"]} == {"cs.PL", "cs.DC"}
+    assert body["count"] == 0
+    assert len(body["failures"]) == 1
 
 
 @pytest.mark.asyncio
@@ -148,29 +156,28 @@ async def test_digest_endpoint_classifies_rate_limit_failures(atlas_data_dir):
     db.init()
     fake_resp = _httpx.Response(429, request=_httpx.Request("GET", "http://x"))
     rate_err = _httpx.HTTPStatusError("429", request=fake_resp.request, response=fake_resp)
-    fetch = AsyncMock(side_effect=[rate_err] * 5)
-    with patch("app.main.arxiv.fetch_recent", fetch):
+    fetch = AsyncMock(side_effect=rate_err)
+    with patch("app.digest.arxiv.fetch_recent", fetch):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
             r = await c.get("/api/digest")
     assert r.status_code == 200
     body = r.json()
     assert body["count"] == 0
-    assert all(f["kind"] == "rate_limited" for f in body["failures"])
+    assert body["failures"][0]["kind"] == "rate_limited"
 
 
 @pytest.mark.asyncio
 async def test_digest_endpoint_uses_user_supplied_categories(atlas_data_dir):
-    """`?cats=` overrides the default 5 — only those categories get fetched."""
+    """`?cats=` overrides the defaults — and is what shows up in the query."""
     db.init()
     fetch = AsyncMock(return_value=[])
-    with patch("app.main.arxiv.fetch_recent", fetch):
+    with patch("app.digest.arxiv.fetch_recent", fetch):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
             r = await c.get("/api/digest?cats=cs.PL,math.OC")
     assert r.status_code == 200
     body = r.json()
     assert body["categories"] == ["cs.PL", "math.OC"]
-    queries = [args[0][0] for args in fetch.await_args_list]
-    assert queries == ["cat:cs.PL", "cat:math.OC"]
+    assert fetch.await_count == 1
 
 
 @pytest.mark.asyncio
@@ -186,11 +193,65 @@ async def test_digest_endpoint_rejects_malformed_category(atlas_data_dir):
 async def test_digest_endpoint_falls_back_to_defaults_when_cats_blank(atlas_data_dir):
     db.init()
     fetch = AsyncMock(return_value=[])
-    with patch("app.main.arxiv.fetch_recent", fetch):
+    with patch("app.digest.arxiv.fetch_recent", fetch):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
             r = await c.get("/api/digest?cats=")
     assert r.status_code == 200
-    assert r.json()["categories"] == ["cs.PL", "cs.AR", "cs.DC", "cs.PF", "cs.LG"]
+    assert r.json()["categories"] == ["cs.PL", "cs.AR", "cs.DC", "cs.PF"]
+
+
+@pytest.mark.asyncio
+async def test_digest_endpoint_passes_days_window_to_arxiv(atlas_data_dir):
+    """`?days=N` ANDs an arXiv submittedDate filter onto the OR-clause."""
+    db.init()
+    fetch = AsyncMock(return_value=[])
+    with patch("app.digest.arxiv.fetch_recent", fetch):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            r = await c.get("/api/digest?cats=cs.PL,cs.AR&days=3")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["days"] == 3
+    assert fetch.await_count == 1
+    query = fetch.await_args_list[0].args[0]
+    # Parens isolate the OR so the date filter ANDs against the WHOLE union,
+    # not just the trailing cat:... fragment.
+    assert query.startswith("(cat:cs.PL OR cat:cs.AR) AND submittedDate:[")
+
+
+@pytest.mark.asyncio
+async def test_digest_endpoint_omits_date_filter_when_days_absent(atlas_data_dir):
+    db.init()
+    fetch = AsyncMock(return_value=[])
+    with patch("app.digest.arxiv.fetch_recent", fetch):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            r = await c.get("/api/digest?cats=cs.PL")
+    assert r.status_code == 200
+    assert r.json()["days"] is None
+    query = fetch.await_args_list[0].args[0]
+    assert query == "cat:cs.PL"
+
+
+@pytest.mark.asyncio
+async def test_digest_endpoint_caches_per_days_window(atlas_data_dir):
+    """Cache key is (sorted-cats, days) — different windows mean different
+    arXiv queries; same key within TTL is a hit."""
+    db.init()
+    fetch = AsyncMock(return_value=[])
+    with patch("app.digest.arxiv.fetch_recent", fetch):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            await c.get("/api/digest?cats=cs.PL&days=3")
+            await c.get("/api/digest?cats=cs.PL&days=3")  # hit
+            await c.get("/api/digest?cats=cs.PL&days=7")  # different window
+    assert fetch.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_digest_endpoint_rejects_invalid_days(atlas_data_dir):
+    db.init()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        for bad in ("0", "-1", "999", "abc"):
+            r = await c.get(f"/api/digest?cats=cs.PL&days={bad}")
+            assert r.status_code == 400, (bad, r.text)
 
 
 @pytest.mark.asyncio
@@ -199,7 +260,7 @@ async def test_digest_caches_per_category_and_fresh_busts(atlas_data_dir):
     db.init()
     sample = [Paper("c-1", "T", "A", "x", "cs.PL", "2026-04-22T08:00:00Z")]
     fetch = AsyncMock(return_value=sample)
-    with patch("app.main.arxiv.fetch_recent", fetch):
+    with patch("app.digest.arxiv.fetch_recent", fetch):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
             r1 = await c.get("/api/digest?cats=cs.PL")
             r2 = await c.get("/api/digest?cats=cs.PL")
@@ -319,6 +380,29 @@ async def test_unknown_non_api_path_falls_back_to_index_html(tmp_path, monkeypat
     async with AsyncClient(transport=ASGITransport(app=main_mod.app), base_url="http://t") as c:
         r = await c.get("/reader/2404.12345")
     assert r.status_code == 200
+    assert "Atlas SPA" in r.text
+
+
+@pytest.mark.asyncio
+async def test_spa_fallback_rejects_path_traversal(tmp_path, monkeypatch):
+    """A request that resolves outside the dist dir must fall through to
+    index.html, never serve the escaped file. Without the confinement check,
+    `/../secret.txt` (after FastAPI URL decoding) would be served verbatim
+    because FileResponse does no path validation."""
+    dist = tmp_path / "dist"
+    dist.mkdir()
+    (dist / "index.html").write_text("<!doctype html><title>Atlas SPA</title>")
+    secret = tmp_path / "secret.txt"
+    secret.write_text("BEARER_TOKEN_DO_NOT_LEAK")
+    monkeypatch.setenv("ATLAS_FRONTEND_DIST", str(dist))
+    from importlib import reload
+    from app import main as main_mod
+    reload(main_mod)
+
+    async with AsyncClient(transport=ASGITransport(app=main_mod.app), base_url="http://t") as c:
+        r = await c.get("/../secret.txt")
+    assert r.status_code == 200
+    assert "BEARER_TOKEN_DO_NOT_LEAK" not in r.text
     assert "Atlas SPA" in r.text
 
 

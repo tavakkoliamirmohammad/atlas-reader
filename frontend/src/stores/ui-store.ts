@@ -11,7 +11,16 @@ export type AppMode = "dark" | "light";
 
 export type CustomPalette = { c1: string; c2: string; ink: string };
 
-export type AskRequest = { id: number; prompt: string; displayLabel?: string };
+/**
+ * Visual / session preferences. Everything here is persisted to localStorage
+ * EXCEPT `chipsCollapsed`, which intentionally resets every load so quick
+ * actions reopen for discoverability.
+ *
+ * Ephemeral cross-component action dispatchers (summarize/ask/jumpToPage
+ * request ids and pinnedQuote) live in `ui-actions-store` so the
+ * `partialize` exclusion list here only needs to cover the one truly
+ * session-only flag.
+ */
 
 type UiState = {
   paletteId: string;
@@ -34,15 +43,6 @@ type UiState = {
   setCodexModel: (m: CodexModel) => void;
   setAppMode: (m: AppMode) => void;
   toggleAppMode: () => void;
-  // Ephemeral action dispatchers — NOT persisted. The action-id counters let
-  // subscribers fire on each increment via a `useEffect(..., [id])`.
-  summarizeRequestId: number;
-  askRequest: AskRequest | null;
-  jumpToPageRequest: { id: number; page: number } | null;
-  requestJumpToPage: (page: number) => void;
-  pinnedQuote: { text: string; page: number } | null;
-  setPinnedQuote: (q: { text: string; page: number }) => void;
-  clearPinnedQuote: () => void;
   setPalette: (id: string) => void;
   setCustomPalette: (p: CustomPalette | null) => void;
   toggleLeft: () => void;
@@ -50,8 +50,6 @@ type UiState = {
   setReadingMode: (m: ReadingMode) => void;
   setModel: (m: ModelChoice) => void;
   setLastHighlightColor: (c: HighlightColor) => void;
-  requestSummarize: () => void;
-  requestAsk: (prompt: string, displayLabel?: string) => void;
   cycleReadingMode: () => void;
 };
 
@@ -70,9 +68,9 @@ export const useUiStore = create<UiState>()(
       codexModel: "gpt-5.4",
       backend: "codex",
       lastHighlightColor: "yellow",
-      digestRange: 3,
+      digestRange: 1,
       setDigestRange: (r) => set({ digestRange: r }),
-      digestCategories: ["cs.PL", "cs.AR", "cs.DC", "cs.PF", "cs.LG"],
+      digestCategories: ["cs.PL", "cs.AR", "cs.DC", "cs.PF"],
       setDigestCategories: (cats) =>
         set({ digestCategories: Array.from(new Set(cats)) }),
       chipsCollapsed: false,
@@ -86,16 +84,6 @@ export const useUiStore = create<UiState>()(
           const next: AppMode = s.appMode === "dark" ? "light" : "dark";
           return { appMode: next, readingMode: next };
         }),
-      summarizeRequestId: 0,
-      askRequest: null,
-      jumpToPageRequest: null,
-      requestJumpToPage: (page) =>
-        set((s) => ({
-          jumpToPageRequest: { id: (s.jumpToPageRequest?.id ?? 0) + 1, page },
-        })),
-      pinnedQuote: null,
-      setPinnedQuote: (q) => set({ pinnedQuote: q }),
-      clearPinnedQuote: () => set({ pinnedQuote: null }),
       setPalette: (id) => set({ paletteId: id }),
       setCustomPalette: (p) => set({ customPalette: p }),
       toggleLeft: () => set((s) => ({ leftCollapsed: !s.leftCollapsed })),
@@ -103,11 +91,6 @@ export const useUiStore = create<UiState>()(
       setReadingMode: (m) => set({ readingMode: m }),
       setModel: (m) => set({ model: m }),
       setLastHighlightColor: (c) => set({ lastHighlightColor: c }),
-      requestSummarize: () => set((s) => ({ summarizeRequestId: s.summarizeRequestId + 1 })),
-      requestAsk: (prompt, displayLabel) =>
-        set((s) => ({
-          askRequest: { id: (s.askRequest?.id ?? 0) + 1, prompt, displayLabel },
-        })),
       cycleReadingMode: () =>
         set((s) => {
           const i = READING_MODE_CYCLE.indexOf(s.readingMode);
@@ -117,35 +100,49 @@ export const useUiStore = create<UiState>()(
     }),
     {
       name: "atlas-ui",
-      version: 2,
+      version: 6,
       storage: createJSONStorage(() => localStorage),
-      // v2 drops the `1d` digest range. Any persisted store holding
-      // digestRange: 1 (pre-removal) gets upgraded to 7 so users don't land
-      // on an empty list after deploy.
+      // v3 drops `"all"`; v4 trims the legacy 5-category default to 4;
+      // v6 stops persisting `digestRange` so every open lands on "Today" —
+      // we delete any stale value already in localStorage from older
+      // versions, otherwise the rehydrate step would override the default.
       migrate: (persisted: unknown, version) => {
         const p = persisted as Record<string, unknown> | null;
-        if (p && version < 2 && p.digestRange === 1) {
-          p.digestRange = 7;
+        if (!p) return p as unknown as UiState;
+        if (version < 3 && p.digestRange === "all") p.digestRange = 30;
+        if (version < 4) {
+          const cats = p.digestCategories;
+          const legacyDefault = ["cs.PL", "cs.AR", "cs.DC", "cs.PF", "cs.LG"];
+          if (
+            Array.isArray(cats)
+            && cats.length === legacyDefault.length
+            && cats.every((c, i) => c === legacyDefault[i])
+          ) {
+            p.digestCategories = ["cs.PL", "cs.AR", "cs.DC", "cs.PF"];
+          }
+        }
+        if (version < 6) {
+          delete p.digestRange;
         }
         return p as UiState;
       },
-      // Only persist visual preferences — action-dispatcher fields are ephemeral.
-      partialize: (s) => ({
-        paletteId: s.paletteId,
-        customPalette: s.customPalette,
-        leftCollapsed: s.leftCollapsed,
-        rightCollapsed: s.rightCollapsed,
-        readingMode: s.readingMode,
-        appMode: s.appMode,
-        model: s.model,
-        codexModel: s.codexModel,
-        backend: s.backend,
-        lastHighlightColor: s.lastHighlightColor,
-        digestRange: s.digestRange,
-        digestCategories: s.digestCategories,
-        // chipsCollapsed intentionally NOT persisted — quick actions reopen on
-        // every load for discoverability; users can still collapse per session.
-      }),
+      // Two fields stay session-only:
+      //  - chipsCollapsed: quick actions reopen on every load for discoverability.
+      //  - digestRange: every fresh open should land on "Today"; if we
+      //    persisted the last range the user had picked, returning the
+      //    next morning would still show their old "30d" view instead of
+      //    today's announcements (which is the whole reason they opened
+      //    the app).
+      partialize: (s) => {
+        const {
+          chipsCollapsed: _chips,
+          digestRange: _range,
+          ...rest
+        } = s;
+        void _chips;
+        void _range;
+        return rest;
+      },
     },
   ),
 );

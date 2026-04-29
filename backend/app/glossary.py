@@ -14,7 +14,7 @@ import json
 import sqlite3
 from typing import List, Optional
 
-from app import ai_backend, db, papers, pdf_cache
+from app import ai_backend, db, papers, pdf_fetch
 
 
 _EXTRACT_PROMPT = (
@@ -184,14 +184,14 @@ async def extract_terms(
     if paper is None:
         raise KeyError(arxiv_id)
 
-    pdf_path = await pdf_cache.ensure_cached(arxiv_id)
-    prompt = f"PDF: {pdf_path}\n\n{_EXTRACT_PROMPT}"
-    raw = await _run_text(
-        "Extract terms as a JSON array.",
-        prompt,
-        backend=backend,
-        enable_read_file=str(pdf_path),
-    )
+    async with pdf_fetch.paper_pdf_for_ai(arxiv_id) as pdf_path:
+        prompt = f"PDF: {pdf_path}\n\n{_EXTRACT_PROMPT}"
+        raw = await _run_text(
+            "Extract terms as a JSON array.",
+            prompt,
+            backend=backend,
+            enable_read_file=str(pdf_path),
+        )
     terms = _parse_terms(raw)
     if not terms:
         return []

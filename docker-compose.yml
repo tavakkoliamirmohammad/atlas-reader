@@ -14,7 +14,9 @@ services:
       # read PDF paths the container generates without translation.
       ATLAS_DATA_DIR: ${HOME}/.atlas
       # Route AI calls through the host runner (spawned by `atlas start-runner`).
-      # host.docker.internal resolves to the Mac host's loopback interface.
+      # On Docker Desktop (Mac/Windows) host.docker.internal auto-resolves to
+      # the host. On native Linux Docker it doesn't — the `extra_hosts` entry
+      # below maps it to the bridge gateway. Same name, both platforms.
       ATLAS_AI_PROXY: http://host.docker.internal:${ATLAS_RUNNER_PORT:-8766}
       # Reach the local TTS sidecar over the compose network. No host
       # port is exposed; only sibling containers can talk to it.
@@ -26,6 +28,10 @@ services:
       - ${HOME}/.atlas/runner.env
     volumes:
       - ${HOME}/.atlas:${HOME}/.atlas
+    # No-op on Docker Desktop (host.docker.internal already resolves there);
+    # required on native Linux Docker so the container can reach the host runner.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     restart: unless-stopped
     depends_on:
       tts:

@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Layers } from "lucide-react";
 
 type Props = {
@@ -29,19 +30,58 @@ const CURATED: { code: string; label: string }[] = [
 // Mirrors the backend's _ARXIV_CAT regex so we surface bad input before sending.
 const VALID_CAT = /^[a-z][a-z\-]*(\.[A-Z]{2})?$/;
 
+const POPUP_WIDTH = 300;
+const VIEWPORT_GUTTER = 8;
+
 export function CategoryPicker({ selected, onChange }: Props) {
   const [open, setOpen] = useState(false);
   const [custom, setCustom] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const ref = useRef<HTMLDivElement | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const popupRef = useRef<HTMLDivElement | null>(null);
+  // Pixel-precise top/left for the portaled popup, computed from the
+  // trigger's viewport rect each time it opens. Portaling to <body>
+  // means we escape the sidebar's `overflow: hidden` (which was
+  // clipping the popup's left/right edges before).
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
 
   useEffect(() => {
     if (!open) return;
     const onDocClick = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      const t = e.target as Node;
+      if (triggerRef.current?.contains(t)) return;
+      if (popupRef.current?.contains(t)) return;
+      setOpen(false);
     };
     document.addEventListener("mousedown", onDocClick);
     return () => document.removeEventListener("mousedown", onDocClick);
+  }, [open]);
+
+  // Recompute position synchronously before paint so the popup never
+  // flashes in the wrong place. Pin to the trigger's left edge by
+  // default; flip to right-aligned if that would overflow the viewport.
+  useLayoutEffect(() => {
+    if (!open || !triggerRef.current) return;
+    function place() {
+      const trig = triggerRef.current;
+      if (!trig) return;
+      const r = trig.getBoundingClientRect();
+      const vw = window.innerWidth;
+      // Try left-anchored (popup_left = trigger_left). Fall back to
+      // right-anchored if it would slide past the viewport's right edge.
+      let left = r.left;
+      if (left + POPUP_WIDTH + VIEWPORT_GUTTER > vw) {
+        left = Math.max(VIEWPORT_GUTTER, r.right - POPUP_WIDTH);
+      }
+      setPos({ top: r.bottom + 8, left });
+    }
+    place();
+    window.addEventListener("resize", place);
+    window.addEventListener("scroll", place, true);
+    return () => {
+      window.removeEventListener("resize", place);
+      window.removeEventListener("scroll", place, true);
+    };
   }, [open]);
 
   const selectedSet = new Set(selected);
@@ -67,8 +107,9 @@ export function CategoryPicker({ selected, onChange }: Props) {
   }
 
   return (
-    <div ref={ref} className="relative">
+    <>
       <button
+        ref={triggerRef}
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="dialog"
@@ -81,12 +122,17 @@ export function CategoryPicker({ selected, onChange }: Props) {
         <span>cat{selected.length === 1 ? "" : "s"}</span>
       </button>
 
-      {open && (
+      {open && pos !== null && createPortal(
         <div
+          ref={popupRef}
           role="dialog"
           aria-label="Select arXiv categories"
-          className="absolute top-full right-0 mt-2 w-[240px] rounded-xl backdrop-blur-md shadow-2xl z-30 overflow-hidden"
+          className="fixed rounded-xl backdrop-blur-md shadow-2xl z-50 overflow-hidden"
           style={{
+            top: pos.top,
+            left: pos.left,
+            width: POPUP_WIDTH,
+            maxWidth: "calc(100vw - 1rem)",
             background: "var(--surface-overlay)",
             border: "1px solid var(--surface-overlay-border)",
             color: "var(--surface-overlay-text)",
@@ -95,7 +141,7 @@ export function CategoryPicker({ selected, onChange }: Props) {
           <div className="px-3 py-2 text-[10px] uppercase tracking-wider text-slate-400 border-b border-white/10">
             arXiv categories
           </div>
-          <ul className="max-h-[260px] overflow-y-auto py-1">
+          <ul className="max-h-[340px] overflow-y-auto py-1.5">
             {CURATED.map(({ code, label }) => {
               const checked = selectedSet.has(code);
               return (
@@ -103,12 +149,12 @@ export function CategoryPicker({ selected, onChange }: Props) {
                   <button
                     type="button"
                     onClick={() => toggle(code)}
-                    className="w-full flex items-center justify-between gap-3 px-3 py-1.5 text-left text-[12px] hover:bg-white/5 transition-colors cursor-pointer"
+                    className="w-full flex items-center justify-between gap-4 px-3.5 py-2.5 text-left text-[12px] hover:bg-white/5 transition-colors cursor-pointer"
                   >
-                    <span className="flex items-center gap-2">
+                    <span className="flex items-center gap-2.5">
                       <span
                         aria-hidden
-                        className={`inline-block h-3 w-3 rounded-sm border ${checked ? "bg-[color:var(--ac1)] border-[color:var(--ac1)]" : "border-white/20"}`}
+                        className={`inline-block h-3.5 w-3.5 rounded-sm border ${checked ? "bg-[color:var(--ac1)] border-[color:var(--ac1)]" : "border-white/20"}`}
                       />
                       <span className="font-mono text-[11px]">{code}</span>
                     </span>
@@ -124,12 +170,12 @@ export function CategoryPicker({ selected, onChange }: Props) {
                   <button
                     type="button"
                     onClick={() => toggle(code)}
-                    className="w-full flex items-center justify-between gap-3 px-3 py-1.5 text-left text-[12px] hover:bg-white/5 transition-colors cursor-pointer"
+                    className="w-full flex items-center justify-between gap-4 px-3.5 py-2.5 text-left text-[12px] hover:bg-white/5 transition-colors cursor-pointer"
                   >
-                    <span className="flex items-center gap-2">
+                    <span className="flex items-center gap-2.5">
                       <span
                         aria-hidden
-                        className="inline-block h-3 w-3 rounded-sm bg-[color:var(--ac1)] border border-[color:var(--ac1)]"
+                        className="inline-block h-3.5 w-3.5 rounded-sm bg-[color:var(--ac1)] border border-[color:var(--ac1)]"
                       />
                       <span className="font-mono text-[11px]">{code}</span>
                     </span>
@@ -172,8 +218,9 @@ export function CategoryPicker({ selected, onChange }: Props) {
               </div>
             )}
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
-    </div>
+    </>
   );
 }

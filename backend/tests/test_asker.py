@@ -1,11 +1,19 @@
 import pytest
-from unittest.mock import AsyncMock, patch
+from contextlib import asynccontextmanager
+from unittest.mock import patch
 
 from app import asker, db, papers
 from app.arxiv import Paper
 
 
 SAMPLE = Paper("7", "T", "A", "x", "cs.PL", "2026-04-19T08:00:00Z")
+
+
+def _stub_pdf(path: str = "/tmp/7.pdf"):
+    @asynccontextmanager
+    async def _fake(_arxiv_id):
+        yield path
+    return patch("app.asker.pdf_fetch.paper_pdf_for_ai", _fake)
 
 
 @pytest.mark.asyncio
@@ -17,8 +25,7 @@ async def test_ask_yields_chunks(atlas_data_dir):
         yield "X is "
         yield "a thing.\n"
 
-    with patch("app.asker.pdf_cache.ensure_cached", new=AsyncMock(return_value="/tmp/7.pdf")):
-        with patch("app.asker.ai_backend.run_ai", _fake):
+    with _stub_pdf(), patch("app.asker.ai_backend.run_ai", _fake):
             chunks = [c async for c in asker.ask("7", "What is X?", history=[])]
 
     assert "".join(chunks) == "X is a thing.\n"
@@ -39,8 +46,7 @@ async def test_ask_passes_ask_task_and_history_in_prompt(atlas_data_dir):
         {"role": "assistant", "content": "Earlier A"},
     ]
 
-    with patch("app.asker.pdf_cache.ensure_cached", new=AsyncMock(return_value="/tmp/7.pdf")):
-        with patch("app.asker.ai_backend.run_ai", _capture):
+    with _stub_pdf(), patch("app.asker.ai_backend.run_ai", _capture):
             async for _ in asker.ask("7", "New Q", history=history):
                 pass
 
@@ -63,8 +69,7 @@ async def test_ask_passes_model_override(atlas_data_dir):
         captured.update(kwargs)
         yield ""
 
-    with patch("app.asker.pdf_cache.ensure_cached", new=AsyncMock(return_value="/tmp/7.pdf")):
-        with patch("app.asker.ai_backend.run_ai", _capture):
+    with _stub_pdf(), patch("app.asker.ai_backend.run_ai", _capture):
             async for _ in asker.ask("7", "Q", history=[], model="haiku", backend="claude"):
                 pass
 
@@ -81,8 +86,7 @@ async def test_ask_propagates_subprocess_error(atlas_data_dir):
         yield "partial"
         raise RuntimeError("nope")
 
-    with patch("app.asker.pdf_cache.ensure_cached", new=AsyncMock(return_value="/tmp/7.pdf")):
-        with patch("app.asker.ai_backend.run_ai", _broken):
-            with pytest.raises(Exception):
-                async for _ in asker.ask("7", "Q", history=[]):
-                    pass
+    with _stub_pdf(), patch("app.asker.ai_backend.run_ai", _broken):
+        with pytest.raises(Exception):
+            async for _ in asker.ask("7", "Q", history=[]):
+                pass

@@ -2,7 +2,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { useUiStore } from "@/stores/ui-store";
+import { useUiActionsStore } from "@/stores/ui-actions-store";
 import { ChatPanel } from "./ChatPanel";
 
 vi.mock("@/lib/api", async () => {
@@ -32,7 +32,7 @@ function renderInReader() {
 
 describe("ChatPanel pinned quote", () => {
   beforeEach(() => {
-    useUiStore.setState({ pinnedQuote: null });
+    useUiActionsStore.setState({ pinnedQuote: null });
     // jsdom doesn't implement scrollIntoView; StreamingMessage calls it on mount.
     if (!(Element.prototype as unknown as { scrollIntoView?: unknown }).scrollIntoView) {
       (Element.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView = () => {};
@@ -41,7 +41,7 @@ describe("ChatPanel pinned quote", () => {
 
   it("renders the pinned-quote chip when set and prepends on send", async () => {
     const user = userEvent.setup();
-    useUiStore.setState({
+    useUiActionsStore.setState({
       pinnedQuote: { text: "Tensor cores saturate here", page: 4 },
     });
 
@@ -60,13 +60,13 @@ describe("ChatPanel pinned quote", () => {
     expect(callArg).toContain("why?");
 
     // Chip cleared after send.
-    expect(useUiStore.getState().pinnedQuote).toBeNull();
+    expect(useUiActionsStore.getState().pinnedQuote).toBeNull();
   });
 });
 
 describe("ChatPanel Enter / Shift+Enter", () => {
   beforeEach(() => {
-    useUiStore.setState({ pinnedQuote: null });
+    useUiActionsStore.setState({ pinnedQuote: null });
     if (!(Element.prototype as unknown as { scrollIntoView?: unknown }).scrollIntoView) {
       (Element.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView = () => {};
     }

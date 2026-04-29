@@ -27,9 +27,12 @@ describe("PaperList range selector", () => {
       </MemoryRouter>,
     );
 
-    for (const label of ["3d", "7d", "14d", "30d", "All"]) {
+    for (const label of ["3d", "7d", "14d", "30d"]) {
       expect(screen.getByRole("tab", { name: label })).toBeInTheDocument();
     }
+    // The redundant "30d+" / "All" pill was removed — same data as 30d
+    // under MAX_PER_CATEGORY=100.
+    expect(screen.queryByRole("tab", { name: "30d+" })).toBeNull();
 
     await user.click(screen.getByRole("tab", { name: "30d" }));
     expect(useUiStore.getState().digestRange).toBe(30);

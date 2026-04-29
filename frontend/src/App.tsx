@@ -9,6 +9,7 @@ import { ReopenTab } from "./components/ReopenTab";
 import { IndexRoute } from "./routes/IndexRoute";
 import { ReaderRoute } from "./routes/ReaderRoute";
 import { useUiStore } from "./stores/ui-store";
+import { useUiActionsStore } from "./stores/ui-actions-store";
 import { applyPalette, getPaletteById } from "./lib/theme";
 import { installKeyboard, useShortcut } from "./lib/keyboard";
 import { installMotionAttribute } from "./lib/motion";
@@ -62,7 +63,7 @@ export default function App() {
     "s",
     () => {
       if (!onReaderRoute) return;
-      useUiStore.getState().requestSummarize();
+      useUiActionsStore.getState().requestSummarize();
     },
     [onReaderRoute],
   );

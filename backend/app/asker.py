@@ -19,7 +19,7 @@ import re
 from pathlib import Path
 from typing import AsyncIterator, List, Optional, TypedDict
 
-from app import ai_backend, conversations, papers, pdf_cache
+from app import ai_backend, conversations, papers, pdf_fetch
 
 
 SYSTEM_PATH = Path(__file__).parent / "prompts" / "chat_system.txt"
@@ -168,47 +168,45 @@ async def ask(
     if papers.get(arxiv_id) is None:
         raise KeyError(arxiv_id)
 
-    pdf_path = await pdf_cache.ensure_cached(arxiv_id)
-    system = SYSTEM_PATH.read_text()
+    async with pdf_fetch.paper_pdf_for_ai(arxiv_id) as pdf_path:
+        system = SYSTEM_PATH.read_text()
 
-    windowed = _slide_window(history)
-    was_trimmed = len(windowed) != len(history)
+        windowed = _slide_window(history)
+        was_trimmed = len(windowed) != len(history)
 
-    prompt = (
-        f"{system}\n\n"
-        f"PDF: {pdf_path}\n"
-        f"Use the Read tool to read the PDF if needed."
-        f"{_format_history(windowed, trimmed=was_trimmed)}"
-        f"\n\nUSER QUESTION: {question}\n"
-    )
+        prompt = (
+            f"{system}\n\n"
+            f"PDF: {pdf_path}\n"
+            f"Use the Read tool to read the PDF if needed."
+            f"{_format_history(windowed, trimmed=was_trimmed)}"
+            f"\n\nUSER QUESTION: {question}\n"
+        )
 
-    normalized_backend = ai_backend.normalize_backend(backend)
-    resolved_model = model or await ai_backend.default_model(normalized_backend, "ask")
+        normalized_backend = ai_backend.normalize_backend(backend)
+        resolved_model = model or await ai_backend.default_model(normalized_backend, "ask")
 
-    raw_stream = ai_backend.run_ai(
-        backend=normalized_backend,
-        task="ask",
-        directive="Answer the question.",
-        prompt=prompt,
-        model=model,
-        enable_read_file=str(pdf_path),
-    )
+        raw_stream = ai_backend.run_ai(
+            backend=normalized_backend,
+            task="ask",
+            directive="Answer the question.",
+            prompt=prompt,
+            model=resolved_model,
+            enable_read_file=str(pdf_path),
+        )
 
-    # Collect the streamed chunks so we can persist the complete answer after
-    # the stream ends. We persist the FILTERED stream (post narration strip),
-    # not the raw model output, so reloading a thread doesn't show the
-    # tool-use preamble that we just hid from the live view.
-    parts: list[str] = []
-    try:
-        async for chunk in _strip_narration(raw_stream):
-            parts.append(chunk)
-            yield chunk
-    finally:
-        # Persist only if we got SOMETHING back. A totally empty stream
-        # usually means the backend errored — no point saving a blank reply
-        # that would confuse the next turn.
-        answer = "".join(parts).strip()
-        if answer:
-            user_row_content = (display or "").strip() or question
-            conversations.append(arxiv_id, "user", user_row_content)
-            conversations.append(arxiv_id, "assistant", answer, model=resolved_model)
+        # Collect the streamed chunks so we can persist the complete answer
+        # after the stream ends. We persist the FILTERED stream (post
+        # narration strip), not the raw model output, so reloading a thread
+        # doesn't show the tool-use preamble that we just hid from the live
+        # view.
+        parts: list[str] = []
+        try:
+            async for chunk in _strip_narration(raw_stream):
+                parts.append(chunk)
+                yield chunk
+        finally:
+            answer = "".join(parts).strip()
+            if answer:
+                user_row_content = (display or "").strip() or question
+                conversations.append(arxiv_id, "user", user_row_content)
+                conversations.append(arxiv_id, "assistant", answer, model=resolved_model)
