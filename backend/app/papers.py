@@ -6,8 +6,46 @@ import sqlite3
 from datetime import datetime, timedelta, timezone
 from typing import Iterable, Optional
 
+import httpx
+
+from app import arxiv as _arxiv
 from app import db
 from app.arxiv import Paper
+
+
+class ArxivUnavailable(Exception):
+    """arXiv returned a retryable error (throttling, timeout) we couldn't overcome."""
+
+
+async def ensure_imported(arxiv_id: str) -> bool:
+    """Make sure ``arxiv_id`` has a row in the DB; fetch from arXiv on demand.
+
+    Custom uploads (``custom-`` prefix) are never re-fetched — we only
+    confirm the row already exists. Raises ``ArxivUnavailable`` on
+    throttle/timeout so the route layer can render a clean 503.
+    """
+    # Deferred import: ``imports`` imports ``papers``, so a top-level reference
+    # would create a cycle. The lookup is cached after the first call.
+    from app import imports
+
+    if get(arxiv_id) is not None:
+        return True
+    if imports.is_custom_id(arxiv_id):
+        return False
+    try:
+        paper = await _arxiv.fetch_by_id(arxiv_id)
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code in (429, 503):
+            raise ArxivUnavailable(
+                "arXiv is throttling this IP; try again in a few minutes"
+            ) from exc
+        raise
+    except (httpx.TimeoutException, httpx.TransportError) as exc:
+        raise ArxivUnavailable(f"arXiv unreachable ({type(exc).__name__})") from exc
+    if paper is None:
+        return False
+    upsert([paper])
+    return True
 
 
 def upsert(items: Iterable[Paper]) -> int:

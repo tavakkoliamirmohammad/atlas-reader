@@ -25,6 +25,7 @@ import socket
 from pathlib import Path
 
 from app import db
+from app.fs_util import atomic_write_0o600
 
 DEFAULT_BACKEND_PORT = 8765
 DEFAULT_RUNNER_PORT = 8766
@@ -67,21 +68,6 @@ def backend_port() -> int:
 
 def runner_port() -> int:
     return _resolve("ATLAS_RUNNER_PORT", DEFAULT_RUNNER_PORT)
-
-
-def atomic_write_0o600(path: Path, content: str) -> None:
-    """Write ``content`` to ``path`` atomically at mode 0o600 with no
-    intermediate window at a laxer mode.
-
-    ``write_text(...)`` then ``chmod(...)`` leaks the file at the umask-default
-    mode (typically 0o644) between the two calls — a brief window but one that
-    matters for a file containing ``ATLAS_AI_SECRET``. Here we open with
-    ``O_CREAT | O_WRONLY | O_TRUNC`` at mode 0o600 so the file never exists at
-    a laxer mode.
-    """
-    fd = os.open(path, os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w") as f:
-        f.write(content)
 
 
 def persist_ports(*, backend: int | None, runner: int | None) -> None:

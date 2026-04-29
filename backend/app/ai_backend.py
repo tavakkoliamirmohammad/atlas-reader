@@ -13,15 +13,12 @@ from __future__ import annotations
 
 import json
 import os
-from typing import AsyncIterator, Literal, Optional
+from typing import AsyncIterator, Optional
 
 import httpx
 
 from app import ai_local, codex_models, secret_store
-
-
-Backend = Literal["claude", "codex"]
-Task = Literal["summarize", "ask", "rank", "glossary", "podcast"]
+from app.ai_argv import Backend, Task  # canonical Literal declarations
 
 
 # Claude defaults are aliases — the Anthropic CLI auto-resolves each to the
