@@ -9,13 +9,11 @@ import { PaperRow } from "./PaperRow";
 import { CategoryPicker } from "./CategoryPicker";
 
 const RANGE_OPTIONS: { value: DigestRange; label: string }[] = [
+  { value: 1,  label: "Today" },
   { value: 3,  label: "3d" },
   { value: 7,  label: "7d" },
   { value: 14, label: "14d" },
   { value: 30, label: "30d" },
-  // No "all" / "30d+" — both backend paths cap at MAX_PER_CATEGORY=100 so
-  // for active categories the unscoped fetch returns the same data as
-  // 30d. The pill was redundant.
 ];
 
 type FetchOutcome =

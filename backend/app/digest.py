@@ -1,21 +1,20 @@
-"""Per-request arXiv digest: live fetch + per-category in-memory cache.
+"""Per-request arXiv digest with one-shot OR query + small in-memory cache.
 
-Pulled out of `main.py` so the route handler is just request-handling, with
-the orchestration (validate categories, hit cache, fan out to arXiv, classify
-errors, marshal to dicts) sitting in a module that can be tested without
-standing up FastAPI.
+Two design choices that drive the rate-limit posture:
 
-arXiv publishes new submissions on a roughly daily cadence, so a 2-hour
-in-memory cache stays fresh for typical reading sessions while making
-category toggles, range switches, and follow-up loads instant. The route
-exposes ``fresh=true`` as the user's escape hatch.
+1. **One arXiv request per (cats, days) tuple, not per category.** The Atom
+   export API supports `cat:cs.PL OR cat:cs.AR OR ...` — a single request
+   that returns the union sorted by submittedDate desc. With 4 default
+   categories that drops us from 4 parallel requests per page load to 1.
+   Within arXiv's "no more than 1 request every 3 seconds" guidance.
+2. **Process-local memory cache, no SQLite.** Atlas is single-user; lost
+   cache on container restart is fine. The cost of persisting a cache row
+   (and the schema migration that comes with it) isn't worth it given the
+   hit volume is one entry per range visited per session.
 """
 
 from __future__ import annotations
 
-import asyncio
-import dataclasses
-import json
 import logging
 import re
 import time as _time
@@ -24,7 +23,7 @@ from typing import Iterable
 
 import httpx
 
-from app import arxiv, db
+from app import arxiv
 
 
 log = logging.getLogger("atlas.digest")
@@ -32,16 +31,19 @@ log = logging.getLogger("atlas.digest")
 # Category list defaults / caps. Public so main.py can show them in errors.
 DEFAULT_CATEGORIES: tuple[str, ...] = ("cs.PL", "cs.AR", "cs.DC", "cs.PF")
 MAX_CATEGORIES = 30
-MAX_PER_CATEGORY = 100
+# Combined-query response cap. With N categories OR-joined, results aren't
+# split per-category, so we ask for up to ~N×100 to cover the worst case
+# (every category active and dense). Capped at 1000 because arXiv's export
+# API tops out there.
+MAX_PER_REQUEST = 400
 FETCH_TIMEOUT_S = 30.0
-# 24h TTL on the persisted SQLite cache. arXiv's per-category submission
-# cadence is daily-ish, so a day-long entry stays useful while keeping
-# every page reload from re-hitting an upstream that throttles aggressively.
-# `?fresh=true` is the user's escape hatch for "I want it now."
-CACHE_TTL_S = 24 * 60 * 60
-# Hard cap on `?days=` so a misbehaving client can't ask for "the last 50000
-# days" and trigger an enormous arXiv query. 90 covers every preset the SPA
-# offers (3 / 7 / 14 / 30) plus headroom.
+# 30-minute in-memory TTL. Long enough that page reloads + range toggles
+# within a reading session feel instant; short enough that "I started
+# Atlas this morning, opened it again at lunch" picks up new arXiv
+# announcements without the user reaching for refresh.
+CACHE_TTL_S = 30 * 60
+# Hard cap on `?days=` so a misbehaving client can't ask for "the last
+# 50000 days." 90 covers every preset (1 / 3 / 7 / 14 / 30) plus headroom.
 MAX_DAYS = 90
 
 # arXiv category codes look like ``cs.PL``, ``math.OC``, ``stat.ML``, or bare
@@ -50,51 +52,8 @@ MAX_DAYS = 90
 # operators or whitespace into the search query.
 _ARXIV_CAT = re.compile(r"^[a-z][a-z\-]*(\.[A-Z]{2})?$")
 
-def _cache_key(cat: str, days: int | None) -> str:
-    return f"{cat}|{days if days is not None else 'all'}"
-
-
-def _papers_to_json(papers: list[arxiv.Paper]) -> str:
-    return json.dumps([dataclasses.asdict(p) for p in papers])
-
-
-def _papers_from_json(payload: str) -> list[arxiv.Paper]:
-    return [arxiv.Paper(**row) for row in json.loads(payload)]
-
-
-def _read_cache(key: str) -> tuple[float, list[arxiv.Paper]] | None:
-    """Pull a (fetched_at, papers) entry for `key` from SQLite, or None."""
-    with db.connect() as conn:
-        row = conn.execute(
-            "SELECT fetched_at, payload FROM digest_cache WHERE key = ?",
-            (key,),
-        ).fetchone()
-    if row is None:
-        return None
-    try:
-        return float(row[0]), _papers_from_json(row[1])
-    except (json.JSONDecodeError, TypeError) as exc:
-        log.warning("digest cache row %s unreadable, evicting: %s", key, exc)
-        with db.connect() as conn:
-            conn.execute("DELETE FROM digest_cache WHERE key = ?", (key,))
-        return None
-
-
-def _write_cache(key: str, papers: list[arxiv.Paper]) -> None:
-    payload = _papers_to_json(papers)
-    now = _time.time()
-    with db.connect() as conn:
-        conn.execute(
-            "INSERT OR REPLACE INTO digest_cache (key, fetched_at, payload) "
-            "VALUES (?, ?, ?)",
-            (key, now, payload),
-        )
-
-
-def clear_cache() -> None:
-    """Evict every cached digest row. Used by tests and on schema changes."""
-    with db.connect() as conn:
-        conn.execute("DELETE FROM digest_cache")
+# {(sorted-cat-tuple, days): (fetched_at, papers)} — wiped on restart.
+_cache: dict[tuple[tuple[str, ...], int | None], tuple[float, list[arxiv.Paper]]] = {}
 
 
 class InvalidCategory(ValueError):
@@ -188,64 +147,70 @@ def classify_fetch_error(exc: BaseException) -> str:
     return type(exc).__name__
 
 
-async def _fetch_one(cat: str, *, fresh: bool, days: int | None) -> list[arxiv.Paper]:
-    """Fetch one category, hitting the SQLite cache on the warm path.
+def clear_cache() -> None:
+    """Drop every cached digest entry. Used by tests."""
+    _cache.clear()
 
-    The 24-hour TTL is wall-clock (``time.time``) so it survives container
-    restarts — the user gets the same hits across a `down` / `up` cycle.
-    `fresh=True` bypasses both the read and the freshness check, then
-    overwrites the row with the new payload.
+
+def _build_query(cats: tuple[str, ...], days: int | None) -> str:
+    """One arXiv search_query string covering all categories at once.
+
+    `cat:cs.PL OR cat:cs.AR OR ...` joins the categories into a single
+    union; appending the submittedDate window keeps the result trimmed to
+    the user's range without N parallel requests.
     """
-    key = _cache_key(cat, days)
-    if not fresh:
-        entry = _read_cache(key)
-        if entry is not None:
-            fetched_at, cached = entry
-            if (_time.time() - fetched_at) < CACHE_TTL_S:
-                return cached
-    query = f"cat:{cat}"
+    cat_clause = " OR ".join(f"cat:{c}" for c in cats)
+    # Parens isolate the OR — without them arXiv would AND the date
+    # filter against only the LAST cat:... fragment.
     if days is not None:
-        # Push the date filter to arXiv so we don't fetch and discard hundreds
-        # of papers we'd then drop client-side. With a 3-day window most
-        # categories return well under MAX_PER_CATEGORY, often 5–30 papers.
-        query = f"{query} AND {_date_window_clause(days)}"
-    result = await arxiv.fetch_recent(
-        query, max_results=MAX_PER_CATEGORY, timeout=FETCH_TIMEOUT_S,
-    )
-    _write_cache(key, result)
-    return result
+        return f"({cat_clause}) AND {_date_window_clause(days)}"
+    return cat_clause
 
 
 async def build(
     categories: Iterable[str], *, fresh: bool, days: int | None = None,
 ) -> dict:
-    """Run the per-category fan-out and return the JSON-ready dict.
+    """Run a single combined arXiv query and return the JSON-ready dict.
 
-    Partial failures are tolerated; whatever came back is returned. The
-    failure list lets the SPA show a per-category warning without losing
-    the categories that did succeed.
-
-    ``days`` (when set) constrains the arXiv search to the trailing N-day
-    window. Without it, we fetch up to ``MAX_PER_CATEGORY`` recent papers
-    per category and the SPA filters client-side — fine for "all-time"
-    but expensive when the user only wanted the last 3 days.
+    The cache key includes the sorted category tuple AND the days window;
+    different ranges are independent entries. ``fresh=True`` bypasses the
+    cache and overwrites the entry on success.
     """
     cats = tuple(categories)
-    results = await asyncio.gather(
-        *(_fetch_one(c, fresh=fresh, days=days) for c in cats),
-        return_exceptions=True,
-    )
-    seen: dict[str, arxiv.Paper] = {}
+    cache_key = (tuple(sorted(cats)), days)
+
+    if not fresh:
+        entry = _cache.get(cache_key)
+        if entry is not None and (_time.monotonic() - entry[0]) < CACHE_TTL_S:
+            papers = entry[1]
+            return _shape(cats, days, papers, failures=[])
+
+    query = _build_query(cats, days)
     failures: list[dict] = []
-    for cat, res in zip(cats, results):
-        if isinstance(res, Exception):
-            kind = classify_fetch_error(res)
-            log.warning("digest: fetch failed cat:%s kind=%s err=%s", cat, kind, res)
-            failures.append({"category": cat, "kind": kind})
-            continue
-        for p in res:
-            seen.setdefault(p.arxiv_id, p)
-    items = sorted(seen.values(), key=lambda p: p.published, reverse=True)
+    try:
+        papers = await arxiv.fetch_recent(
+            query, max_results=MAX_PER_REQUEST, timeout=FETCH_TIMEOUT_S,
+        )
+        _cache[cache_key] = (_time.monotonic(), papers)
+    except Exception as exc:  # noqa: BLE001 — we want to surface every kind
+        kind = classify_fetch_error(exc)
+        log.warning("digest: fetch failed kind=%s cats=%s days=%s err=%s",
+                    kind, cats, days, exc)
+        failures.append({"category": ",".join(cats), "kind": kind})
+        papers = []
+
+    return _shape(cats, days, papers, failures=failures)
+
+
+def _shape(
+    cats: tuple[str, ...],
+    days: int | None,
+    papers: list[arxiv.Paper],
+    *,
+    failures: list[dict],
+) -> dict:
+    """Assemble the response shape — sorted desc by submittedDate."""
+    items = sorted(papers, key=lambda p: p.published, reverse=True)
     return {
         "count": len(items),
         "papers": [paper_to_dict(p) for p in items],

@@ -33,9 +33,8 @@ export function TopBar() {
         <svg
           aria-hidden
           viewBox="0 0 24 24"
-          className="w-[18px] h-[18px] block transition-transform duration-300 group-hover:rotate-[-4deg]"
+          className="brand-mark w-[18px] h-[18px] block transition-transform duration-300 group-hover:rotate-[-4deg]"
           fill="none"
-          stroke="var(--ac1)"
           strokeWidth="1.6"
           strokeLinecap="round"
           strokeLinejoin="round"

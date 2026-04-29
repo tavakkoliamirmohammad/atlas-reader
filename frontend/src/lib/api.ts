@@ -54,10 +54,10 @@ export type DigestResponse = {
 // ui-store.ts imports `HighlightColor` + `ModelChoice` from this module.
 // `DigestRange` doubles as the client-side filter window AND the
 // `?days=` value we send to the backend so it scopes the arXiv query
-// itself. There used to be an "all" value, but the backend caps at
-// MAX_PER_CATEGORY=100 either way — so "all" returned the same data as
-// 30d for active categories. Drop the redundant pill.
-export type DigestRange = 3 | 7 | 14 | 30;
+// itself. `1` is the default — most reading sessions are about
+// catching up on today's announcements; the wider windows are for
+// "what did I miss" passes.
+export type DigestRange = 1 | 3 | 7 | 14 | 30;
 
 async function getJson<T>(path: string, signal?: AbortSignal): Promise<T> {
   const res = await fetch(u(path), { signal });

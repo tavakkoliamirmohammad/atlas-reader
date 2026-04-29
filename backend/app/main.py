@@ -11,7 +11,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import httpx
-from fastapi import FastAPI, HTTPException, Response
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -194,20 +194,24 @@ def _row_to_dict(row) -> dict:
 
 @app.get("/api/digest")
 async def get_digest(
+    request: Request,
     cats: str | None = None,
     fresh: bool = False,
     days: str | None = None,
 ) -> dict:
-    """Live arXiv fetch — every page load is a fresh request.
+    """Live arXiv fetch — one combined OR query per (cats, days) tuple.
 
-    `cats` is an optional comma-separated list of arXiv category codes
-    (e.g. `cs.PL,cs.AR,math.OC`); empty falls back to a curated default
-    set in `digest.DEFAULT_CATEGORIES`. `fresh=true` bypasses the
-    per-category in-memory TTL cache. `days=N` (1..MAX_DAYS) constrains
-    the arXiv query to the trailing N-day window so a 3-day filter
-    doesn't pull hundreds of papers we'd just discard client-side. Each
-    page load also kicks the throttled cleanup sweep as a fire-and-forget
-    side effect.
+    `cats` is an optional comma-separated list of arXiv category codes;
+    empty falls back to `digest.DEFAULT_CATEGORIES`. `fresh=true` bypasses
+    the in-memory TTL cache. `days=N` (1..MAX_DAYS) constrains the arXiv
+    query to a trailing N-day window. Each page load also kicks the
+    throttled cleanup sweep as a fire-and-forget side effect.
+
+    Disconnect propagation: the build runs as a child task; if the
+    client closes the connection mid-flight (SPA aborted via
+    AbortController), we cancel the task — which cancels the awaiting
+    httpx request — so the upstream arXiv connection actually closes
+    instead of hanging on past the user's "I changed my mind" click.
     """
     try:
         categories = digest.parse_categories(cats)
@@ -216,7 +220,34 @@ async def get_digest(
             digest.InvalidDays) as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     asyncio.create_task(asyncio.to_thread(cleanup.sweep))
-    return await digest.build(categories, fresh=fresh, days=days_int)
+
+    build_task = asyncio.create_task(
+        digest.build(categories, fresh=fresh, days=days_int)
+    )
+
+    async def watch_disconnect() -> None:
+        # Poll the ASGI receive channel for the client-disconnect message.
+        # The 250ms tick is a balance: tighter is wasted CPU on a
+        # never-disconnecting request; looser leaves stale upstream
+        # requests running for noticeable time after the abort.
+        while not build_task.done():
+            try:
+                if await request.is_disconnected():
+                    build_task.cancel()
+                    return
+            except Exception:  # noqa: BLE001
+                return  # connection closed in a way we can't poll — bail
+            await asyncio.sleep(0.25)
+
+    watcher = asyncio.create_task(watch_disconnect())
+    try:
+        return await build_task
+    except asyncio.CancelledError:
+        # 499 (nginx convention) — request never completed because the
+        # client went away. The SPA's AbortError swallows this anyway.
+        raise HTTPException(status_code=499, detail="client closed request")
+    finally:
+        watcher.cancel()
 
 
 @app.get("/api/papers/{arxiv_id}")

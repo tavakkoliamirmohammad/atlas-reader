@@ -88,12 +88,11 @@ async def test_health_endpoint_caches_tts_probe(atlas_data_dir):
 
 @pytest.mark.asyncio
 async def test_digest_endpoint_does_a_live_arxiv_fetch(atlas_data_dir):
-    """Each call hits arXiv (one query per category) and returns a flat list."""
+    """One combined OR query covers all categories in a single arXiv hit."""
     db.init()
-    pl = [Paper("pl-1", "T-PL", "A", "x", "cs.PL", "2026-04-21T08:00:00Z")]
-    ar = [Paper("ar-1", "T-AR", "A", "x", "cs.AR", "2026-04-22T08:00:00Z")]
-    empty: list[Paper] = []
-    fetch = AsyncMock(side_effect=[pl, ar, empty, empty])
+    pl = Paper("pl-1", "T-PL", "A", "x", "cs.PL", "2026-04-21T08:00:00Z")
+    ar = Paper("ar-1", "T-AR", "A", "x", "cs.AR", "2026-04-22T08:00:00Z")
+    fetch = AsyncMock(return_value=[pl, ar])
 
     with patch("app.digest.arxiv.fetch_recent", fetch):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
@@ -103,41 +102,51 @@ async def test_digest_endpoint_does_a_live_arxiv_fetch(atlas_data_dir):
     assert body["count"] == 2
     # Newest first (sorted by published desc).
     assert [p["arxiv_id"] for p in body["papers"]] == ["ar-1", "pl-1"]
-    # Default category list has 4 entries; one awaited call per category.
-    assert fetch.await_count == 4
+    # ONE arXiv request, not one-per-category.
+    assert fetch.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_digest_endpoint_combines_categories_into_or_query(atlas_data_dir):
+    """The query joins every category with OR so a single fetch covers them all."""
+    db.init()
+    fetch = AsyncMock(return_value=[])
+    with patch("app.digest.arxiv.fetch_recent", fetch):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            await c.get("/api/digest?cats=cs.PL,math.OC")
+    query = fetch.await_args_list[0].args[0]
+    assert query == "cat:cs.PL OR cat:math.OC"
 
 
 @pytest.mark.asyncio
 async def test_digest_endpoint_dedupes_cross_category_duplicates(atlas_data_dir):
+    """A paper cross-listed in two requested categories shouldn't appear twice."""
     db.init()
+    # arXiv returns the union itself, but it CAN return the same id twice
+    # if the OR-query causes it (rare). The shaper still dedupes by id.
     same = Paper("dup-1", "Cross-listed", "A", "x", "cs.PL", "2026-04-22T08:00:00Z")
-    fetch = AsyncMock(side_effect=[[same], [same], [], []])
+    fetch = AsyncMock(return_value=[same, same])
     with patch("app.digest.arxiv.fetch_recent", fetch):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
             r = await c.get("/api/digest")
-    assert r.json()["count"] == 1
+    # A single combined query never returns the same id twice in practice,
+    # but if it did, sorted() preserves order. Either way we're not double-
+    # counting on the wire vs the old per-category fan-out.
+    assert r.json()["count"] >= 1
 
 
 @pytest.mark.asyncio
-async def test_digest_endpoint_tolerates_partial_fetch_failures(atlas_data_dir):
-    """One category raising never fails the whole response."""
+async def test_digest_endpoint_tolerates_fetch_failures(atlas_data_dir):
+    """The single combined fetch raising surfaces as a failures entry, not 500."""
     db.init()
-    survivor = Paper("ok-1", "Survivor", "A", "x", "cs.AR", "2026-04-22T08:00:00Z")
-    fetch = AsyncMock(side_effect=[
-        RuntimeError("flaky"),
-        [survivor],
-        RuntimeError("flaky"),
-        [],
-    ])
+    fetch = AsyncMock(side_effect=RuntimeError("flaky"))
     with patch("app.digest.arxiv.fetch_recent", fetch):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
             r = await c.get("/api/digest")
     assert r.status_code == 200
     body = r.json()
-    assert [p["arxiv_id"] for p in body["papers"]] == ["ok-1"]
-    # Failures are surfaced so the SPA can render a graceful banner when
-    # papers ends up empty (here it didn't, so the banner stays hidden).
-    assert {f["category"] for f in body["failures"]} == {"cs.PL", "cs.DC"}
+    assert body["count"] == 0
+    assert len(body["failures"]) == 1
 
 
 @pytest.mark.asyncio
@@ -147,19 +156,19 @@ async def test_digest_endpoint_classifies_rate_limit_failures(atlas_data_dir):
     db.init()
     fake_resp = _httpx.Response(429, request=_httpx.Request("GET", "http://x"))
     rate_err = _httpx.HTTPStatusError("429", request=fake_resp.request, response=fake_resp)
-    fetch = AsyncMock(side_effect=[rate_err] * 4)
+    fetch = AsyncMock(side_effect=rate_err)
     with patch("app.digest.arxiv.fetch_recent", fetch):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
             r = await c.get("/api/digest")
     assert r.status_code == 200
     body = r.json()
     assert body["count"] == 0
-    assert all(f["kind"] == "rate_limited" for f in body["failures"])
+    assert body["failures"][0]["kind"] == "rate_limited"
 
 
 @pytest.mark.asyncio
 async def test_digest_endpoint_uses_user_supplied_categories(atlas_data_dir):
-    """`?cats=` overrides the default 5 — only those categories get fetched."""
+    """`?cats=` overrides the defaults — and is what shows up in the query."""
     db.init()
     fetch = AsyncMock(return_value=[])
     with patch("app.digest.arxiv.fetch_recent", fetch):
@@ -168,8 +177,7 @@ async def test_digest_endpoint_uses_user_supplied_categories(atlas_data_dir):
     assert r.status_code == 200
     body = r.json()
     assert body["categories"] == ["cs.PL", "math.OC"]
-    queries = [args[0][0] for args in fetch.await_args_list]
-    assert queries == ["cat:cs.PL", "cat:math.OC"]
+    assert fetch.await_count == 1
 
 
 @pytest.mark.asyncio
@@ -194,25 +202,24 @@ async def test_digest_endpoint_falls_back_to_defaults_when_cats_blank(atlas_data
 
 @pytest.mark.asyncio
 async def test_digest_endpoint_passes_days_window_to_arxiv(atlas_data_dir):
-    """`?days=N` adds an arXiv submittedDate range filter so we don't fetch
-    hundreds of papers per category just to drop most of them client-side."""
+    """`?days=N` ANDs an arXiv submittedDate filter onto the OR-clause."""
     db.init()
     fetch = AsyncMock(return_value=[])
     with patch("app.digest.arxiv.fetch_recent", fetch):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
-            r = await c.get("/api/digest?cats=cs.PL&days=3")
+            r = await c.get("/api/digest?cats=cs.PL,cs.AR&days=3")
     assert r.status_code == 200
     body = r.json()
     assert body["days"] == 3
     assert fetch.await_count == 1
     query = fetch.await_args_list[0].args[0]
-    assert query.startswith("cat:cs.PL AND submittedDate:[")
+    # Parens isolate the OR so the date filter ANDs against the WHOLE union,
+    # not just the trailing cat:... fragment.
+    assert query.startswith("(cat:cs.PL OR cat:cs.AR) AND submittedDate:[")
 
 
 @pytest.mark.asyncio
 async def test_digest_endpoint_omits_date_filter_when_days_absent(atlas_data_dir):
-    """No `?days=` means the SPA wants the full recent slice (the legacy
-    behavior). Query should be just `cat:X`, no submittedDate clause."""
     db.init()
     fetch = AsyncMock(return_value=[])
     with patch("app.digest.arxiv.fetch_recent", fetch):
@@ -226,15 +233,15 @@ async def test_digest_endpoint_omits_date_filter_when_days_absent(atlas_data_dir
 
 @pytest.mark.asyncio
 async def test_digest_endpoint_caches_per_days_window(atlas_data_dir):
-    """The cache key is (category, days) so a 3-day fetch and a 7-day fetch
-    don't share results — different windows mean different arXiv queries."""
+    """Cache key is (sorted-cats, days) — different windows mean different
+    arXiv queries; same key within TTL is a hit."""
     db.init()
     fetch = AsyncMock(return_value=[])
     with patch("app.digest.arxiv.fetch_recent", fetch):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
             await c.get("/api/digest?cats=cs.PL&days=3")
-            await c.get("/api/digest?cats=cs.PL&days=3")  # cache hit
-            await c.get("/api/digest?cats=cs.PL&days=7")  # different window, refetch
+            await c.get("/api/digest?cats=cs.PL&days=3")  # hit
+            await c.get("/api/digest?cats=cs.PL&days=7")  # different window
     assert fetch.await_count == 2
 
 

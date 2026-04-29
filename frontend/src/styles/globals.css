@@ -95,6 +95,11 @@ html[data-app-mode="light"] .brand-wordmark {
   color: #0b1220;
 }
 
+/* SVG "A" mark: bright cyan accent on the dark UI, deep ink in light
+   mode (where the cyan disappears against the cyan-tinted page bg). */
+.brand-mark { stroke: var(--ac1); }
+html[data-app-mode="light"] .brand-mark { stroke: #0b1220; }
+
 html, body, #root { height: 100%; overflow: hidden; }
 body { background: #08080d; color: #e5e7ef; font-family: Inter, system-ui, sans-serif; }
 

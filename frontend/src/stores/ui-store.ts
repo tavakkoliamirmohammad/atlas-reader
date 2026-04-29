@@ -68,7 +68,7 @@ export const useUiStore = create<UiState>()(
       codexModel: "gpt-5.4",
       backend: "codex",
       lastHighlightColor: "yellow",
-      digestRange: 3,
+      digestRange: 1,
       setDigestRange: (r) => set({ digestRange: r }),
       digestCategories: ["cs.PL", "cs.AR", "cs.DC", "cs.PF"],
       setDigestCategories: (cats) =>
@@ -100,17 +100,15 @@ export const useUiStore = create<UiState>()(
     }),
     {
       name: "atlas-ui",
-      version: 4,
+      version: 6,
       storage: createJSONStorage(() => localStorage),
-      // v2 dropped the `1d` digest range; v3 drops the `"all"` value
-      // (which behaved identically to 30d under MAX_PER_CATEGORY=100);
-      // v4 trims the legacy 5-category default to 4 (cs.LG out). We only
-      // touch users whose persisted set is byte-equal to the old default,
-      // so anyone who customized their list keeps their picks.
+      // v3 drops `"all"`; v4 trims the legacy 5-category default to 4;
+      // v6 stops persisting `digestRange` so every open lands on "Today" —
+      // we delete any stale value already in localStorage from older
+      // versions, otherwise the rehydrate step would override the default.
       migrate: (persisted: unknown, version) => {
         const p = persisted as Record<string, unknown> | null;
         if (!p) return p as unknown as UiState;
-        if (version < 2 && p.digestRange === 1) p.digestRange = 7;
         if (version < 3 && p.digestRange === "all") p.digestRange = 30;
         if (version < 4) {
           const cats = p.digestCategories;
@@ -123,14 +121,26 @@ export const useUiStore = create<UiState>()(
             p.digestCategories = ["cs.PL", "cs.AR", "cs.DC", "cs.PF"];
           }
         }
+        if (version < 6) {
+          delete p.digestRange;
+        }
         return p as UiState;
       },
-      // chipsCollapsed is the only intentionally non-persisted field — quick
-      // actions reopen on every load for discoverability. Everything else in
-      // the store is session-stable and persisted.
+      // Two fields stay session-only:
+      //  - chipsCollapsed: quick actions reopen on every load for discoverability.
+      //  - digestRange: every fresh open should land on "Today"; if we
+      //    persisted the last range the user had picked, returning the
+      //    next morning would still show their old "30d" view instead of
+      //    today's announcements (which is the whole reason they opened
+      //    the app).
       partialize: (s) => {
-        const { chipsCollapsed: _omit, ...rest } = s;
-        void _omit;
+        const {
+          chipsCollapsed: _chips,
+          digestRange: _range,
+          ...rest
+        } = s;
+        void _chips;
+        void _range;
         return rest;
       },
     },
