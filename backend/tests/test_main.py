@@ -323,6 +323,29 @@ async def test_unknown_non_api_path_falls_back_to_index_html(tmp_path, monkeypat
 
 
 @pytest.mark.asyncio
+async def test_spa_fallback_rejects_path_traversal(tmp_path, monkeypatch):
+    """A request that resolves outside the dist dir must fall through to
+    index.html, never serve the escaped file. Without the confinement check,
+    `/../secret.txt` (after FastAPI URL decoding) would be served verbatim
+    because FileResponse does no path validation."""
+    dist = tmp_path / "dist"
+    dist.mkdir()
+    (dist / "index.html").write_text("<!doctype html><title>Atlas SPA</title>")
+    secret = tmp_path / "secret.txt"
+    secret.write_text("BEARER_TOKEN_DO_NOT_LEAK")
+    monkeypatch.setenv("ATLAS_FRONTEND_DIST", str(dist))
+    from importlib import reload
+    from app import main as main_mod
+    reload(main_mod)
+
+    async with AsyncClient(transport=ASGITransport(app=main_mod.app), base_url="http://t") as c:
+        r = await c.get("/../secret.txt")
+    assert r.status_code == 200
+    assert "BEARER_TOKEN_DO_NOT_LEAK" not in r.text
+    assert "Atlas SPA" in r.text
+
+
+@pytest.mark.asyncio
 async def test_stats_endpoint_returns_all_fields(atlas_data_dir):
     db.init()
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:

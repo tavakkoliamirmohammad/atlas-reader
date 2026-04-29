@@ -12,7 +12,7 @@ Atlas is a local-first tool. The interesting attack surface is the **AI runner**
 
 Defenses (verified by `backend/tests/test_runner_security.py`):
 
-- Binds `127.0.0.1` only (loopback; no LAN exposure).
+- Bind host: `127.0.0.1` on macOS/Windows (Docker Desktop maps `host.docker.internal` back to host loopback). On Linux the runner defaults to `0.0.0.0` because the bridge gateway IP can't reach a loopback-only listener — and **the runner logs a warning on every Linux start** to make this visible. Bearer auth + Host-header allowlist remain the security boundary; the bearer token has 256 bits of entropy and `secrets.compare_digest` is constant-time, so brute force isn't a meaningful threat. For tighter isolation on a shared / LAN-exposed Linux host, firewall the runner port from non-loopback sources or set `ATLAS_RUNNER_HOST` explicitly to the docker bridge IP.
 - Bearer token required for every request. Secret at `~/.atlas/runner.secret`, mode 0600.
 - Host-header allowlist (`localhost`, `127.0.0.1`, `host.docker.internal`) — DNS-rebinding defense.
 - Typed jobs only (Pydantic `RunRequest`); no raw argv, no shell.

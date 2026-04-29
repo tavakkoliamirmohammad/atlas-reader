@@ -5,7 +5,10 @@ arm64 CLI binaries, so the backend (with ATLAS_AI_PROXY set) HTTP-streams from
 this runner on host.docker.internal:8766 instead of spawning directly.
 
 Hardening (enforced by tests):
-- Binds 127.0.0.1 only; host.docker.internal maps back to loopback on Mac.
+- Bind host: 127.0.0.1 on macOS/Windows (Docker Desktop's host.docker.internal
+  routes back to host loopback). On Linux the bridge network can't reach
+  127.0.0.1, so we default to 0.0.0.0 there; bearer auth + Host-header
+  allowlist + rate limit are the security boundary either way.
 - Bearer token required on every request.
 - Host-header allowlist — DNS-rebinding defense.
 - Typed jobs only. No raw argv. No shell.
@@ -27,10 +30,11 @@ import json
 import logging
 import os
 import secrets as _secrets
+import sys
 import time
 import uuid
 from pathlib import Path
-from typing import AsyncIterator, Literal, Optional
+from typing import AsyncIterator, Optional
 
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -39,6 +43,7 @@ from pydantic import BaseModel, Field, field_validator
 import uvicorn
 
 from app import ai_argv, ai_local, codex_models, db, port_config, secret_store, subprocess_spawn
+from app.ai_argv import Backend, Task
 
 
 log = logging.getLogger("atlas.runner")
@@ -55,10 +60,19 @@ RATE_LIMIT_PER_MIN = 30
 IDLE_TIMEOUT_S = float(os.environ.get("ATLAS_IDLE_TIMEOUT_S", "300"))
 
 
+def _is_within(child: Path, parent: Path) -> bool:
+    """True iff `child` (already resolved) lives under `parent`."""
+    try:
+        child.relative_to(parent)
+    except ValueError:
+        return False
+    return True
+
+
 # ---------- request model ----------
 class RunRequest(BaseModel):
-    backend: Literal["claude", "codex"]
-    task: Literal["summarize", "ask", "rank", "glossary", "podcast"]
+    backend: Backend
+    task: Task
     model: str
     directive: str = Field(min_length=1, max_length=MAX_DIRECTIVE_LEN)
     prompt: str  # sent via subprocess stdin; size checked below
@@ -89,11 +103,19 @@ class RunRequest(BaseModel):
         p = Path(v)
         if not p.is_absolute() or ".." in p.parts:
             raise ValueError("read path must be absolute, no traversal")
+        # Confine to the two directories that hold paper PDFs:
+        # - pdfs/ — custom uploads + URL imports.
+        # - tmp/  — ephemeral arXiv downloads, fetched per-call (no disk cache).
+        # Anything else under ATLAS_DATA_DIR is sensitive (runner.secret,
+        # runner.env, atlas.db) and must never be reachable through this knob,
+        # even via a symlink that resolves into the data dir.
         data_root = db.data_dir().resolve()
-        try:
-            p.resolve().relative_to(data_root)
-        except ValueError:
-            raise ValueError("read path must live inside ATLAS_DATA_DIR")
+        allowed = (data_root / "pdfs", data_root / "tmp")
+        resolved = p.resolve()
+        if not any(_is_within(resolved, base) for base in allowed):
+            raise ValueError(
+                "read path must live under ATLAS_DATA_DIR/pdfs/ or /tmp/"
+            )
         return str(p)
 
 
@@ -268,9 +290,34 @@ def main() -> None:
             "atlas-ai-runner: no secret found. Run `atlas up` first, or "
             "set ATLAS_AI_SECRET in the environment."
         )
-    host = os.environ.get("ATLAS_RUNNER_HOST", "127.0.0.1")
     port = port_config.runner_port()
+    host = os.environ.get("ATLAS_RUNNER_HOST") or _default_bind_host(port)
+    if host == "0.0.0.0":
+        # Loud, non-suppressible notice: bearer auth + Host-header allowlist
+        # are still the security boundary, but the runner is now reachable on
+        # every NIC (including LAN). Mac/Windows Docker Desktop sidesteps this
+        # because its host.docker.internal routes to host loopback; native
+        # Linux Docker doesn't, so we bind broadly. See SECURITY.md.
+        log.warning(
+            "atlas-runner: bound to 0.0.0.0:%d (Linux). The bearer token + "
+            "Host-header allowlist gate every request, but for tighter "
+            "isolation firewall this port from non-loopback sources or set "
+            "ATLAS_RUNNER_HOST=<docker bridge IP> explicitly.", port,
+        )
     uvicorn.run(app, host=host, port=port, log_level="info")
+
+
+def _default_bind_host(port: int) -> str:
+    """Pick a bind host that lets the container reach us, on every platform.
+
+    Docker Desktop (Mac/Windows) routes host.docker.internal back to host
+    loopback, so 127.0.0.1 works. Native Linux Docker doesn't — the bridge
+    gateway IP can't reach a loopback-only listener. We don't try to
+    autodetect the docker bridge IP at startup because the per-project
+    compose bridge usually doesn't exist yet at that point; binding broadly
+    and gating on bearer auth is simpler and more robust.
+    """
+    return "0.0.0.0" if sys.platform.startswith("linux") else "127.0.0.1"
 
 
 if __name__ == "__main__":

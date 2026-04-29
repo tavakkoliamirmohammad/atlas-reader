@@ -26,12 +26,11 @@ from app import (
     codex_models,
     conversations,
     db,
+    digest,
     glossary,
-    health,
     highlights,
     imports,
     papers,
-    pdf_cache,
     podcast,
     search,
     stats,
@@ -193,191 +192,32 @@ def _row_to_dict(row) -> dict:
     raise TypeError(f"Cannot convert {type(row).__name__} to dict")
 
 
-# Default categories pulled from arXiv when the client doesn't pass `?cats=`.
-# Order here only affects which entry wins on a cross-category duplicate id
-# (first wins).
-DIGEST_DEFAULT_CATEGORIES = ("cs.PL", "cs.AR", "cs.DC", "cs.PF", "cs.LG")
-DIGEST_MAX_PER_CATEGORY = 100
-DIGEST_FETCH_TIMEOUT = 30.0
-DIGEST_MAX_CATEGORIES = 30
-
-# Per-category in-memory TTL cache. arXiv publishes new submissions on a
-# rough daily cadence, so a 2-hour cache stays fresh for typical reading
-# sessions while making category toggles, range switches and follow-up
-# loads instant. The refresh button bypasses this with `?fresh=true`,
-# which is the user's escape hatch when they want to see the latest now.
-_DIGEST_CACHE_TTL_S = 2 * 60 * 60
-_digest_cache: dict[str, tuple[float, list]] = {}
-
-# arXiv category codes look like `cs.PL`, `math.OC`, `stat.ML`, or bare
-# archive prefixes like `physics` / `q-bio`. This regex is permissive
-# enough to cover all of them while rejecting anything that could smuggle
-# operators or whitespace into the search query.
-import re as _re
-_ARXIV_CAT = _re.compile(r"^[a-z][a-z\-]*(\.[A-Z]{2})?$")
-
-
-def _parse_categories(raw: str | None) -> tuple[str, ...]:
-    """Validate the user-supplied ?cats=… and fall back to defaults if absent."""
-    if raw is None or not raw.strip():
-        return DIGEST_DEFAULT_CATEGORIES
-    seen: list[str] = []
-    for token in raw.split(","):
-        c = token.strip()
-        if not c:
-            continue
-        if not _ARXIV_CAT.match(c):
-            raise HTTPException(
-                status_code=400, detail=f"invalid arxiv category: {c!r}"
-            )
-        if c not in seen:
-            seen.append(c)
-    if not seen:
-        return DIGEST_DEFAULT_CATEGORIES
-    if len(seen) > DIGEST_MAX_CATEGORIES:
-        raise HTTPException(
-            status_code=400,
-            detail=f"too many categories (max {DIGEST_MAX_CATEGORIES})",
-        )
-    return tuple(seen)
-
-
-def _paper_to_dict(p: arxiv.Paper) -> dict:
-    """Match the legacy `papers` row shape so the SPA's Paper type is unchanged."""
-    return {
-        "arxiv_id": p.arxiv_id,
-        "title": p.title,
-        "authors": p.authors,
-        "abstract": p.abstract,
-        "categories": p.categories,
-        "published": p.published,
-        "pdf_path": None,
-        "ai_tier": None,
-        "ai_score": None,
-        "read_state": "unread",
-    }
-
-
 @app.get("/api/digest")
 async def get_digest(cats: str | None = None, fresh: bool = False) -> dict:
     """Live arXiv fetch — every page load is a fresh request.
 
     `cats` is an optional comma-separated list of arXiv category codes
-    (e.g. `cs.PL,cs.AR,math.OC`). When omitted, falls back to a curated
-    default set. Each category fires a parallel fetch; partial failures
-    are tolerated (whatever came back is returned). The frontend filters
-    by date client-side.
-
-    `fresh=true` bypasses the per-category in-memory cache. The user-
-    facing refresh button passes this so an explicit "show me the
-    newest" doesn't get a stale snapshot.
-
-    Also kicks the throttled cleanup sweep as a fire-and-forget side
-    effect: each page load is a natural opportunity to prune stale
-    podcast files without making the user wait.
+    (e.g. `cs.PL,cs.AR,math.OC`); empty falls back to a curated default
+    set in `digest.DEFAULT_CATEGORIES`. `fresh=true` bypasses the
+    per-category in-memory TTL cache. Each page load also kicks the
+    throttled cleanup sweep as a fire-and-forget side effect.
     """
-    categories = _parse_categories(cats)
-    asyncio.create_task(asyncio.to_thread(cleanup.sweep))
-
-    async def _fetch(cat: str) -> list[arxiv.Paper]:
-        # Per-category cache: a category that just came back fresh can
-        # serve any future digest request that includes it, regardless of
-        # what other categories ride alongside.
-        now = _time.monotonic()
-        if not fresh:
-            entry = _digest_cache.get(cat)
-            if entry and (now - entry[0]) < _DIGEST_CACHE_TTL_S:
-                return entry[1]
-        result = await arxiv.fetch_recent(
-            f"cat:{cat}",
-            max_results=DIGEST_MAX_PER_CATEGORY,
-            timeout=DIGEST_FETCH_TIMEOUT,
-        )
-        _digest_cache[cat] = (now, result)
-        return result
-
-    results = await asyncio.gather(
-        *(_fetch(c) for c in categories),
-        return_exceptions=True,
-    )
-
-    import logging
-    log = logging.getLogger("atlas.digest")
-    seen: dict[str, arxiv.Paper] = {}
-    failures: list[dict] = []
-    for cat, res in zip(categories, results):
-        if isinstance(res, Exception):
-            kind = _classify_fetch_error(res)
-            log.warning("digest: fetch failed cat:%s kind=%s err=%s",
-                        cat, kind, res)
-            failures.append({"category": cat, "kind": kind})
-            continue
-        for p in res:
-            seen.setdefault(p.arxiv_id, p)
-
-    items = sorted(seen.values(), key=lambda p: p.published, reverse=True)
-    return {
-        "count": len(items),
-        "papers": [_paper_to_dict(p) for p in items],
-        "categories": list(categories),
-        "failures": failures,
-    }
-
-
-def _classify_fetch_error(exc: BaseException) -> str:
-    """Classify an arXiv fetch failure into a stable string the SPA can render.
-
-    The backend already retries 429/503 with backoff; if we still see one
-    here, the API is genuinely throttling our IP and the right thing for
-    the UI is to say so plainly.
-    """
-    if isinstance(exc, httpx.HTTPStatusError):
-        sc = exc.response.status_code
-        if sc in (429, 503):
-            return "rate_limited"
-        return f"http_{sc}"
-    if isinstance(exc, (httpx.TimeoutException, httpx.TransportError)):
-        return "unreachable"
-    return type(exc).__name__
-
-
-class ArxivUnavailable(Exception):
-    """arXiv returned a retryable error (throttling, timeout) we couldn't overcome."""
-
-
-async def _ensure_paper_imported(arxiv_id: str) -> bool:
-    """If the paper isn't in the DB, fetch it from arXiv and insert. Return True if known.
-
-    For `custom-*` ids (URL/upload imports), arXiv is never consulted — we
-    only check whether the row already exists.
-
-    Raises `ArxivUnavailable` on throttle/timeout so the endpoint can turn that
-    into a 503 with a clear message, rather than an opaque 500.
-    """
-    if papers.get(arxiv_id) is not None:
-        return True
-    if imports.is_custom_id(arxiv_id):
-        return False
     try:
-        paper = await arxiv.fetch_by_id(arxiv_id)
-    except httpx.HTTPStatusError as exc:
-        if exc.response.status_code in (429, 503):
-            raise ArxivUnavailable("arXiv is throttling this IP; try again in a few minutes") from exc
-        raise
-    except (httpx.TimeoutException, httpx.TransportError) as exc:
-        raise ArxivUnavailable(f"arXiv unreachable ({type(exc).__name__})") from exc
-    if paper is None:
-        return False
-    papers.upsert([paper])
-    return True
+        categories = digest.parse_categories(cats)
+    except digest.InvalidCategory as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except digest.TooManyCategories as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    asyncio.create_task(asyncio.to_thread(cleanup.sweep))
+    return await digest.build(categories, fresh=fresh)
 
 
 @app.get("/api/papers/{arxiv_id}")
 async def get_paper(arxiv_id: str) -> dict:
     """Return paper metadata. Auto-imports from arXiv if not already in DB."""
     try:
-        imported = await _ensure_paper_imported(arxiv_id)
-    except ArxivUnavailable as exc:
+        imported = await papers.ensure_imported(arxiv_id)
+    except papers.ArxivUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc))
     if not imported:
         raise HTTPException(status_code=404, detail="paper not found on arXiv")
@@ -393,8 +233,8 @@ async def get_pdf(arxiv_id: str):
     stream directly from arxiv.org on every request (no persistent disk cache).
     """
     try:
-        imported = await _ensure_paper_imported(arxiv_id)
-    except ArxivUnavailable as exc:
+        imported = await papers.ensure_imported(arxiv_id)
+    except papers.ArxivUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc))
     if not imported:
         raise HTTPException(status_code=404, detail="paper not found")
@@ -762,11 +602,22 @@ if _dist is not None:
     async def _index() -> FileResponse:
         return FileResponse(_dist / "index.html", headers=_NO_CACHE_HEADERS)
 
+    _DIST_RESOLVED = _dist.resolve()
+
     @app.get("/{full_path:path}", include_in_schema=False)
     async def _spa_fallback(full_path: str) -> FileResponse:
         if full_path.startswith("api/"):
             raise HTTPException(status_code=404)
-        candidate = _dist / full_path
+        # Confine the served path to the dist directory. Without this check a
+        # request like `/../runner.secret` (after URL decoding) would resolve
+        # outside `_dist` and FileResponse would happily serve it; the data
+        # dir is bind-mounted at the same path inside the container, so any
+        # file the container can read is reachable from the browser.
+        candidate = (_dist / full_path).resolve()
+        try:
+            candidate.relative_to(_DIST_RESOLVED)
+        except ValueError:
+            return FileResponse(_dist / "index.html", headers=_NO_CACHE_HEADERS)
         if candidate.is_file():
             return FileResponse(candidate)
         return FileResponse(_dist / "index.html", headers=_NO_CACHE_HEADERS)
