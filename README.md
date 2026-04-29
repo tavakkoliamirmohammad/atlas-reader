@@ -48,6 +48,7 @@ Flags are persisted to `~/.atlas/runner.env` so subsequent `atlas down`, `atlas 
 | --- | --- |
 | `atlas up [--port N] [--runner-port N]` | Start host runner + backend container; wait for health; open browser. |
 | `atlas down` | Stop the container and the host runner. |
+| `atlas restart [--port N] [--runner-port N]` | Stop and start everything; useful after env changes. |
 | `atlas status` | `docker compose ps` + runner status + active ports. |
 | `atlas logs` | Stream backend container logs (`docker compose logs -f atlas`). |
 | `atlas runner-logs` | Tail `~/.atlas/atlas-runner.log`. |

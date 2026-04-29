@@ -280,6 +280,12 @@ def cmd_down(_args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_restart(args: argparse.Namespace) -> int:
+    """Stop everything, then start it again. Accepts the same port flags as `up`."""
+    cmd_down(args)
+    return cmd_up(args)
+
+
 def cmd_status(_args: argparse.Namespace) -> int:
     """Show docker compose service status + runner PID/port."""
     if _have_docker():
@@ -381,6 +387,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     p_up.add_argument("--runner-port", type=int, default=None,
                       help="host port for the AI runner (default 8766)")
 
+    p_restart = sub.add_parser("restart", help="stop and start backend + runner")
+    p_restart.add_argument("--port", type=int, default=None,
+                           help="host port to publish the backend on (default 8765)")
+    p_restart.add_argument("--runner-port", type=int, default=None,
+                           help="host port for the AI runner (default 8766)")
+
     for name in ("down", "status", "logs", "runner-logs",
                  "start-runner", "stop-runner", "open", "doctor",
                  "install-launchd", "uninstall-launchd"):
@@ -390,6 +402,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     handlers = {
         "up":                cmd_up,
         "down":              cmd_down,
+        "restart":           cmd_restart,
         "status":            cmd_status,
         "logs":              cmd_logs,
         "runner-logs":       cmd_runner_logs,
