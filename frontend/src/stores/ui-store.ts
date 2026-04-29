@@ -68,7 +68,7 @@ export const useUiStore = create<UiState>()(
       codexModel: "gpt-5.4",
       backend: "codex",
       lastHighlightColor: "yellow",
-      digestRange: 1,
+      digestRange: 3,
       setDigestRange: (r) => set({ digestRange: r }),
       digestCategories: ["cs.PL", "cs.AR", "cs.DC", "cs.PF"],
       setDigestCategories: (cats) =>
@@ -103,9 +103,10 @@ export const useUiStore = create<UiState>()(
       version: 6,
       storage: createJSONStorage(() => localStorage),
       // v3 drops `"all"`; v4 trims the legacy 5-category default to 4;
-      // v6 stops persisting `digestRange` so every open lands on "Today" —
-      // we delete any stale value already in localStorage from older
-      // versions, otherwise the rehydrate step would override the default.
+      // v6 stops persisting `digestRange` so every open lands on the
+      // default 3-day window — we delete any stale value already in
+      // localStorage from older versions (incl. the retired `1` "Today"
+      // option), otherwise the rehydrate step would override the default.
       migrate: (persisted: unknown, version) => {
         const p = persisted as Record<string, unknown> | null;
         if (!p) return p as unknown as UiState;
@@ -128,11 +129,11 @@ export const useUiStore = create<UiState>()(
       },
       // Two fields stay session-only:
       //  - chipsCollapsed: quick actions reopen on every load for discoverability.
-      //  - digestRange: every fresh open should land on "Today"; if we
-      //    persisted the last range the user had picked, returning the
-      //    next morning would still show their old "30d" view instead of
-      //    today's announcements (which is the whole reason they opened
-      //    the app).
+      //  - digestRange: every fresh open should land on the default 3d
+      //    window; if we persisted the last range the user had picked,
+      //    returning the next morning would still show their old "30d"
+      //    view instead of recent announcements (which is the whole
+      //    reason they opened the app).
       partialize: (s) => {
         const {
           chipsCollapsed: _chips,

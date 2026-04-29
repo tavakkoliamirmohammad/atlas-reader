@@ -19,7 +19,7 @@ describe("PaperList range selector", () => {
     useUiStore.setState({ digestRange: 7 });
   });
 
-  it("renders five range tabs and updates the store on click", async () => {
+  it("renders four range tabs and updates the store on click", async () => {
     const user = userEvent.setup();
     render(
       <MemoryRouter>
@@ -31,8 +31,10 @@ describe("PaperList range selector", () => {
       expect(screen.getByRole("tab", { name: label })).toBeInTheDocument();
     }
     // The redundant "30d+" / "All" pill was removed — same data as 30d
-    // under MAX_PER_CATEGORY=100.
+    // under MAX_PER_CATEGORY=100. The "Today" (1d) pill was also retired:
+    // 3d already covers the catch-up case without a near-empty default.
     expect(screen.queryByRole("tab", { name: "30d+" })).toBeNull();
+    expect(screen.queryByRole("tab", { name: "Today" })).toBeNull();
 
     await user.click(screen.getByRole("tab", { name: "30d" }));
     expect(useUiStore.getState().digestRange).toBe(30);

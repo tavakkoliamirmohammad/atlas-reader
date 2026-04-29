@@ -9,7 +9,6 @@ import { PaperRow } from "./PaperRow";
 import { CategoryPicker } from "./CategoryPicker";
 
 const RANGE_OPTIONS: { value: DigestRange; label: string }[] = [
-  { value: 1,  label: "Today" },
   { value: 3,  label: "3d" },
   { value: 7,  label: "7d" },
   { value: 14, label: "14d" },
@@ -478,7 +477,7 @@ export function PaperList() {
         ref={pickerRef}
         role="tablist"
         aria-label="Archive range"
-        className="relative rounded-xl border border-white/5 bg-white/[0.02] p-1 grid grid-cols-5 gap-0 mx-2 mb-2"
+        className="relative rounded-xl border border-white/5 bg-white/[0.02] p-1 grid grid-cols-4 gap-0 mx-2 mb-2"
       >
         <div
           aria-hidden
