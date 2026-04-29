@@ -95,7 +95,7 @@ async def test_digest_endpoint_does_a_live_arxiv_fetch(atlas_data_dir):
     empty: list[Paper] = []
     fetch = AsyncMock(side_effect=[pl, ar, empty, empty, empty])
 
-    with patch("app.main.arxiv.fetch_recent", fetch):
+    with patch("app.digest.arxiv.fetch_recent", fetch):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
             r = await c.get("/api/digest")
     assert r.status_code == 200
@@ -112,7 +112,7 @@ async def test_digest_endpoint_dedupes_cross_category_duplicates(atlas_data_dir)
     db.init()
     same = Paper("dup-1", "Cross-listed", "A", "x", "cs.PL", "2026-04-22T08:00:00Z")
     fetch = AsyncMock(side_effect=[[same], [same], [], [], []])
-    with patch("app.main.arxiv.fetch_recent", fetch):
+    with patch("app.digest.arxiv.fetch_recent", fetch):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
             r = await c.get("/api/digest")
     assert r.json()["count"] == 1
@@ -130,7 +130,7 @@ async def test_digest_endpoint_tolerates_partial_fetch_failures(atlas_data_dir):
         [],
         [],
     ])
-    with patch("app.main.arxiv.fetch_recent", fetch):
+    with patch("app.digest.arxiv.fetch_recent", fetch):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
             r = await c.get("/api/digest")
     assert r.status_code == 200
@@ -149,7 +149,7 @@ async def test_digest_endpoint_classifies_rate_limit_failures(atlas_data_dir):
     fake_resp = _httpx.Response(429, request=_httpx.Request("GET", "http://x"))
     rate_err = _httpx.HTTPStatusError("429", request=fake_resp.request, response=fake_resp)
     fetch = AsyncMock(side_effect=[rate_err] * 5)
-    with patch("app.main.arxiv.fetch_recent", fetch):
+    with patch("app.digest.arxiv.fetch_recent", fetch):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
             r = await c.get("/api/digest")
     assert r.status_code == 200
@@ -163,7 +163,7 @@ async def test_digest_endpoint_uses_user_supplied_categories(atlas_data_dir):
     """`?cats=` overrides the default 5 — only those categories get fetched."""
     db.init()
     fetch = AsyncMock(return_value=[])
-    with patch("app.main.arxiv.fetch_recent", fetch):
+    with patch("app.digest.arxiv.fetch_recent", fetch):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
             r = await c.get("/api/digest?cats=cs.PL,math.OC")
     assert r.status_code == 200
@@ -186,7 +186,7 @@ async def test_digest_endpoint_rejects_malformed_category(atlas_data_dir):
 async def test_digest_endpoint_falls_back_to_defaults_when_cats_blank(atlas_data_dir):
     db.init()
     fetch = AsyncMock(return_value=[])
-    with patch("app.main.arxiv.fetch_recent", fetch):
+    with patch("app.digest.arxiv.fetch_recent", fetch):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
             r = await c.get("/api/digest?cats=")
     assert r.status_code == 200
@@ -199,7 +199,7 @@ async def test_digest_caches_per_category_and_fresh_busts(atlas_data_dir):
     db.init()
     sample = [Paper("c-1", "T", "A", "x", "cs.PL", "2026-04-22T08:00:00Z")]
     fetch = AsyncMock(return_value=sample)
-    with patch("app.main.arxiv.fetch_recent", fetch):
+    with patch("app.digest.arxiv.fetch_recent", fetch):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
             r1 = await c.get("/api/digest?cats=cs.PL")
             r2 = await c.get("/api/digest?cats=cs.PL")

@@ -21,9 +21,9 @@ def atlas_data_dir(monkeypatch, tmp_path):
     monkeypatch.delenv("ATLAS_PORT", raising=False)
     monkeypatch.delenv("ATLAS_RUNNER_PORT", raising=False)
     try:
-        from app import main as _main
-        _main._digest_cache.clear()
-    except Exception:  # pragma: no cover — main may not be importable in some tests
+        from app import digest as _digest
+        _digest._cache.clear()
+    except Exception:  # pragma: no cover — module may not be importable in some tests
         pass
     return data_dir
 
