@@ -27,7 +27,7 @@ describe("PaperList range selector", () => {
       </MemoryRouter>,
     );
 
-    for (const label of ["3d", "7d", "14d", "30d", "All"]) {
+    for (const label of ["3d", "7d", "14d", "30d", "30d+"]) {
       expect(screen.getByRole("tab", { name: label })).toBeInTheDocument();
     }
 

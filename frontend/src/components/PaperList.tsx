@@ -13,28 +13,10 @@ const RANGE_OPTIONS: { value: DigestRange; label: string }[] = [
   { value: 7,     label: "7d" },
   { value: 14,    label: "14d" },
   { value: 30,    label: "30d" },
-  { value: "all", label: "All" },
+  // "30d+" because the backend cap is 90d — this isn't all-of-arXiv, it's
+  // "the largest window we offer." Calling it "All" was misleading.
+  { value: "all", label: "30d+" },
 ];
-
-type RangeCounts = Partial<Record<string, number>>;
-
-function rangeKey(r: DigestRange): string {
-  return String(r);
-}
-
-function countInRange(papers: Paper[], range: DigestRange): number {
-  if (range === "all") return papers.length;
-  const cutoffMs = Date.now() - range * 24 * 60 * 60 * 1000;
-  return papers.filter((p) => new Date(p.published).getTime() >= cutoffMs).length;
-}
-
-function computeAllCounts(papers: Paper[]): RangeCounts {
-  const out: RangeCounts = {};
-  for (const opt of RANGE_OPTIONS) {
-    out[rangeKey(opt.value)] = countInRange(papers, opt.value);
-  }
-  return out;
-}
 
 type FetchOutcome =
   | { kind: "ok" }
@@ -182,7 +164,9 @@ export function PaperList() {
       // `fresh=true` bypasses the backend's per-category TTL cache so the
       // user actually sees the latest arXiv state when they hit the
       // refresh button (otherwise we'd hand them the cached snapshot).
-      const res = await api.digest(digestCategories, true);
+      // `digestRange` matters here too — refreshing the 3-day view should
+      // refetch 3 days, not the unscoped slice.
+      const res = await api.digest(digestCategories, true, digestRange);
       const delta = res.papers.length - before;
       setPapers(res.papers);
       const o = summarizeFailures(res.failures, res.papers.length);
@@ -205,13 +189,6 @@ export function PaperList() {
       setRefreshing(false);
     }
   }
-
-  // Counts per range come from the same in-memory `papers` list, so every
-  // segment shows a real number without a second round trip to arXiv.
-  const rangeCounts = useMemo<RangeCounts>(
-    () => computeAllCounts(papers),
-    [papers],
-  );
 
   // Measure the active segment so the sliding indicator lines up precisely.
   // Re-run on range change and on container resize (left panel collapse).
@@ -487,7 +464,13 @@ export function PaperList() {
         />
         {RANGE_OPTIONS.map((opt, i) => {
           const active = digestRange === opt.value;
-          const count = rangeCounts?.[rangeKey(opt.value)];
+          // Only the active pill shows a number — the other pills haven't
+          // been fetched, so any count we computed here would be a lie
+          // (e.g. counting last-3-days papers under the "30d" pill just
+          // because the user happens to be viewing the 3-day slice). The
+          // honest UI is: label only, plus the active count, plus a
+          // spinner when that count is being fetched.
+          const showSpinner = active && fetching;
           return (
             <button
               key={String(opt.value)}
@@ -508,11 +491,19 @@ export function PaperList() {
               <span className="text-[11px] font-medium leading-none">{opt.label}</span>
               <span
                 className={[
-                  "text-[10px] font-mono tabular-nums leading-none mt-1",
+                  "text-[10px] font-mono tabular-nums leading-none mt-1 h-3",
                   active ? "text-[color:var(--ac1)]" : "text-slate-500",
                 ].join(" ")}
               >
-                {count === undefined ? "—" : count}
+                {showSpinner ? (
+                  <span
+                    className="inline-block w-2 h-2 rounded-full border border-white/20 animate-spin"
+                    style={{ borderTopColor: "var(--ac1)" }}
+                    aria-label="Loading"
+                  />
+                ) : active ? (
+                  papers.length
+                ) : null}
               </span>
             </button>
           );
@@ -631,10 +622,33 @@ export function PaperList() {
             ) : (
               <>
                 <div className="text-[13px] text-slate-300 font-medium">
-                  No papers from arXiv right now
+                  {digestRange === "all"
+                    ? "No papers in the last 90 days"
+                    : `No papers in the last ${digestRange} days`}
                 </div>
-                <div className="text-[11px] text-slate-400 leading-relaxed">
-                  Try widening the range or selecting more categories.
+                <div className="text-[11px] text-slate-400 leading-relaxed max-w-xs">
+                  arXiv had nothing for these categories in this window.
+                  Try a wider range, more categories, or refresh.
+                </div>
+                <div className="flex gap-2 mt-2">
+                  {digestRange !== "all" && (
+                    <button
+                      type="button"
+                      onClick={() => setDigestRange("all")}
+                      className="px-3 py-1.5 text-[11px] rounded-md border border-white/15 hover:border-[color:var(--ac1-mid)] hover:text-slate-100 transition-colors cursor-pointer"
+                    >
+                      Widen to 30d+
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={onRefresh}
+                    disabled={refreshing}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[11px] rounded-md border border-white/15 hover:border-[color:var(--ac1-mid)] hover:text-slate-100 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <RefreshCcw size={12} className={refreshing ? "animate-spin" : ""} />
+                    Refresh
+                  </button>
                 </div>
               </>
             )}
