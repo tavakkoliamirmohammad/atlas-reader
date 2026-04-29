@@ -3,122 +3,20 @@ import { useMatch } from "react-router-dom";
 import { ChevronDown, ChevronRight, Trash2 } from "lucide-react";
 import {
   type ChatMessage,
-  type CodexModelInfo,
   type Paper,
   api,
   clearConversation,
   fetchConversations,
-  getCodexModels,
   streamAsk,
   streamSummary,
 } from "@/lib/api";
 import { StreamingMessage } from "./StreamingMessage";
 import { QuickActionChips } from "./QuickActionChips";
 import { Glossary } from "./Glossary";
-import { useUiStore, type ModelChoice } from "@/stores/ui-store";
+import { BackendModelPicker, useCodexModels } from "./ModelPicker";
+import { useUiStore } from "@/stores/ui-store";
+import { useUiActionsStore } from "@/stores/ui-actions-store";
 import { usePodcastStore } from "@/stores/podcast-store";
-
-const CLAUDE_MODEL_META: Record<ModelChoice, { label: string; tag: string }> = {
-  opus:   { label: "Opus",   tag: "deepest"  },
-  sonnet: { label: "Sonnet", tag: "balanced" },
-  haiku:  { label: "Haiku",  tag: "fastest"  },
-};
-
-type GenericPickerProps<T extends string> = {
-  model: T;
-  options: T[];
-  meta: Record<T, { label: string; tag: string }>;
-  onChange: (m: T) => void;
-  disabled?: boolean;
-};
-
-function GenericModelPicker<T extends string>({
-  model, options, meta, onChange, disabled,
-}: GenericPickerProps<T>) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const onDocClick = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", onDocClick);
-    return () => document.removeEventListener("mousedown", onDocClick);
-  }, [open]);
-
-  // Fall back to the raw slug while options are still loading.
-  const labelOf = (m: T): string => meta[m]?.label ?? m;
-  const tagOf = (m: T): string => meta[m]?.tag ?? "";
-
-  return (
-    <div ref={ref} className="relative">
-      <button
-        type="button"
-        disabled={disabled}
-        onClick={() => setOpen((v) => !v)}
-        aria-label="Model"
-        aria-expanded={open}
-        className="model-pill inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-[11px] hover:border-[color:var(--ac1-mid)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
-      >
-        <span className="w-1.5 h-1.5 rounded-full" style={{ background: "var(--ac1)" }} />
-        <span>{labelOf(model)}</span>
-        <svg width="9" height="9" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
-          <path d="M3 4.5l3 3 3-3" />
-        </svg>
-      </button>
-      {open && (
-        <div
-          className="absolute bottom-full left-0 mb-1.5 w-56 max-h-[55vh] overflow-y-auto rounded-xl backdrop-blur-md shadow-2xl z-30 divide-y divide-white/5"
-          role="listbox"
-          style={{
-            background: "var(--surface-overlay)",
-            border: "1px solid var(--surface-overlay-border)",
-            color: "var(--surface-overlay-text)",
-          }}
-        >
-          {options.map((m) => {
-            const active = m === model;
-            const description = tagOf(m);
-            return (
-              <button
-                key={m}
-                type="button"
-                role="option"
-                aria-selected={active}
-                onClick={() => { onChange(m); setOpen(false); }}
-                className={[
-                  "w-full flex items-start gap-2 px-2.5 py-2 text-left",
-                  "hover:bg-white/5 transition-colors cursor-pointer",
-                  active ? "bg-[color:var(--ac1-soft)]" : "",
-                ].join(" ")}
-              >
-                <span
-                  className="mt-1 shrink-0 w-1 h-1 rounded-full"
-                  style={{ background: active ? "var(--ac1)" : "rgb(100 116 139)" }}
-                />
-                <span className="flex-1 min-w-0 flex flex-col leading-tight">
-                  <span
-                    className={[
-                      "text-[11px] truncate",
-                      active ? "text-slate-100 font-medium" : "text-slate-200",
-                    ].join(" ")}
-                  >
-                    {labelOf(m)}
-                  </span>
-                  {description && (
-                    <span className="mt-1 text-[10px] leading-snug text-slate-400 break-words">
-                      {description}
-                    </span>
-                  )}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-}
 
 export function ChatPanel() {
   // useMatch climbs the URL directly, so this works even though ChatPanel
@@ -153,33 +51,11 @@ export function ChatPanel() {
     api.paper(arxivId).then((p: Paper) => setPaperTitle(p.title)).catch(() => {});
   }, [arxivId]);
 
-  // Discover codex models from `~/.codex/models_cache.json` via the backend.
-  // Only fetched when codex is the active backend; the picker won't render
-  // for any other state. If the persisted `codexModel` no longer appears in
-  // the fetched list (model retired, fresh install, etc.), swap to the first
-  // by codex's own priority order.
-  const [codexModels, setCodexModels] = useState<CodexModelInfo[]>([]);
-  useEffect(() => {
-    if (backend !== "codex") return;
-    let cancelled = false;
-    getCodexModels()
-      .then((list) => {
-        if (cancelled || list.length === 0) return;
-        setCodexModels(list);
-        if (!list.some((m) => m.slug === codexModel)) {
-          setCodexModel(list[0].slug);
-        }
-      })
-      .catch(() => { /* picker just stays empty; user shouldn't reach here */ });
-    return () => { cancelled = true; };
-    // codexModel isn't a dep — we only want to re-fetch on backend switch,
-    // and we read codexModel inside via the closure for the swap check.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [backend]);
-  const summarizeRequestId = useUiStore((s) => s.summarizeRequestId);
-  const askRequest = useUiStore((s) => s.askRequest);
-  const pinnedQuote = useUiStore((s) => s.pinnedQuote);
-  const clearPinnedQuote = useUiStore((s) => s.clearPinnedQuote);
+  const codexModels = useCodexModels(backend === "codex", codexModel, setCodexModel);
+  const summarizeRequestId = useUiActionsStore((s) => s.summarizeRequestId);
+  const askRequest = useUiActionsStore((s) => s.askRequest);
+  const pinnedQuote = useUiActionsStore((s) => s.pinnedQuote);
+  const clearPinnedQuote = useUiActionsStore((s) => s.clearPinnedQuote);
   const chipsCollapsed = useUiStore((s) => s.chipsCollapsed);
   const toggleChipsCollapsed = useUiStore((s) => s.toggleChipsCollapsed);
 
@@ -495,25 +371,15 @@ export function ChatPanel() {
             className="bg-transparent border-0 outline-none text-[13px] leading-relaxed text-slate-100 placeholder:text-slate-500 resize-none disabled:opacity-50 min-h-[60px] max-h-[200px]"
           />
           <div className="flex items-center justify-between gap-2">
-            {backend === "claude" ? (
-              <GenericModelPicker
-                model={model}
-                options={["opus", "sonnet", "haiku"] as ModelChoice[]}
-                meta={CLAUDE_MODEL_META}
-                onChange={setModel}
-                disabled={streaming}
-              />
-            ) : (
-              <GenericModelPicker
-                model={codexModel}
-                options={codexModels.map((m) => m.slug)}
-                meta={Object.fromEntries(
-                  codexModels.map((m) => [m.slug, { label: m.label, tag: m.description }]),
-                ) as Record<string, { label: string; tag: string }>}
-                onChange={setCodexModel}
-                disabled={streaming || codexModels.length === 0}
-              />
-            )}
+            <BackendModelPicker
+              backend={backend}
+              claudeModel={model}
+              codexModel={codexModel}
+              codexModels={codexModels}
+              onClaudeChange={setModel}
+              onCodexChange={setCodexModel}
+              disabled={streaming}
+            />
             <div className="flex items-center gap-2">
               <span className="text-[10px] text-slate-400 hidden sm:inline">
                 <kbd className="px-1 py-px border border-white/10 rounded font-mono text-[9px]">⌘</kbd>

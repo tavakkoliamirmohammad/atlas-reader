@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useMatch, useNavigate } from "react-router-dom";
 import { useUiStore, type ReadingMode } from "@/stores/ui-store";
+import { useUiActionsStore } from "@/stores/ui-actions-store";
 import { PALETTES } from "@/lib/theme";
 import { QUICK_PROMPTS } from "@/lib/quick-prompts";
 import { u } from "@/lib/api";
@@ -24,8 +25,8 @@ export function CommandPalette({ open, onClose, onSearch, onShowShortcuts }: Pro
   const cycleReadingMode = useUiStore((s) => s.cycleReadingMode);
   const toggleLeft = useUiStore((s) => s.toggleLeft);
   const toggleRight = useUiStore((s) => s.toggleRight);
-  const requestSummarize = useUiStore((s) => s.requestSummarize);
-  const requestAsk = useUiStore((s) => s.requestAsk);
+  const requestSummarize = useUiActionsStore((s) => s.requestSummarize);
+  const requestAsk = useUiActionsStore((s) => s.requestAsk);
 
   // Gate paper-scoped actions on whether the user is currently viewing a paper.
   const readerMatch = useMatch("/reader/:arxivId");

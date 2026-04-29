@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Sun, Book, Moon, Printer } from "lucide-react";
 import { useUiStore, type ReadingMode } from "@/stores/ui-store";
+import { useUiActionsStore } from "@/stores/ui-actions-store";
 import type { HighlightColor } from "@/lib/api";
 import { ReadingProgressRail, type RailSection } from "./ReadingProgressRail";
 import {
@@ -141,7 +142,7 @@ export function PdfPage({
   defaultHighlightColor = "yellow",
 }: Props) {
   const setMode = useUiStore((s) => s.setReadingMode);
-  const jumpToPageRequest = useUiStore((s) => s.jumpToPageRequest);
+  const jumpToPageRequest = useUiActionsStore((s) => s.jumpToPageRequest);
   const [toolbarVisible, setToolbarVisible] = useState(true);
   const hideTimer = useRef<number | null>(null);
   const cardRef = useRef<HTMLDivElement | null>(null);

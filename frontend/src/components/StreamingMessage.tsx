@@ -4,7 +4,7 @@ import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import type { AnyModel, ModelChoice } from "@/lib/api";
-import { useUiStore } from "@/stores/ui-store";
+import { useUiActionsStore } from "@/stores/ui-actions-store";
 import { MermaidDiagram } from "./MermaidDiagram";
 
 type Props = {
@@ -58,7 +58,7 @@ function markdownComponents(isStreaming: boolean): Components {
         return (
           <button
             type="button"
-            onClick={() => useUiStore.getState().requestJumpToPage(page)}
+            onClick={() => useUiActionsStore.getState().requestJumpToPage(page)}
             title={`Jump to page ${page}`}
             className="underline decoration-dotted underline-offset-2 text-[color:var(--ac1)] hover:text-[color:var(--ac1-strong)] cursor-pointer"
           >
