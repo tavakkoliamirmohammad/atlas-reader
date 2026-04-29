@@ -54,9 +54,10 @@ export type DigestResponse = {
 // ui-store.ts imports `HighlightColor` + `ModelChoice` from this module.
 // `DigestRange` doubles as the client-side filter window AND the
 // `?days=` value we send to the backend so it scopes the arXiv query
-// itself. "all" omits `days`, which falls back to the default
-// MAX_PER_CATEGORY recent fetch the SPA filters client-side.
-export type DigestRange = 3 | 7 | 14 | 30 | "all";
+// itself. There used to be an "all" value, but the backend caps at
+// MAX_PER_CATEGORY=100 either way — so "all" returned the same data as
+// 30d for active categories. Drop the redundant pill.
+export type DigestRange = 3 | 7 | 14 | 30;
 
 async function getJson<T>(path: string): Promise<T> {
   const res = await fetch(u(path));
@@ -74,7 +75,7 @@ export const api = {
     const params = new URLSearchParams();
     if (categories?.length) params.set("cats", categories.join(","));
     if (fresh) params.set("fresh", "true");
-    if (typeof days === "number") params.set("days", String(days));
+    if (days != null) params.set("days", String(days));
     const qs = params.toString();
     return getJson<DigestResponse>(`/api/digest${qs ? `?${qs}` : ""}`);
   },

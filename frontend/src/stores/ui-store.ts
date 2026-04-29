@@ -100,16 +100,17 @@ export const useUiStore = create<UiState>()(
     }),
     {
       name: "atlas-ui",
-      version: 2,
+      version: 3,
       storage: createJSONStorage(() => localStorage),
-      // v2 drops the `1d` digest range. Any persisted store holding
-      // digestRange: 1 (pre-removal) gets upgraded to 7 so users don't land
-      // on an empty list after deploy.
+      // v2 dropped the `1d` digest range; v3 drops the `"all"` value
+      // (which behaved identically to 30d under MAX_PER_CATEGORY=100).
+      // Both migrations land users on a sensible window instead of
+      // a gone-or-empty pill after deploy.
       migrate: (persisted: unknown, version) => {
         const p = persisted as Record<string, unknown> | null;
-        if (p && version < 2 && p.digestRange === 1) {
-          p.digestRange = 7;
-        }
+        if (!p) return p as unknown as UiState;
+        if (version < 2 && p.digestRange === 1) p.digestRange = 7;
+        if (version < 3 && p.digestRange === "all") p.digestRange = 30;
         return p as UiState;
       },
       // chipsCollapsed is the only intentionally non-persisted field — quick

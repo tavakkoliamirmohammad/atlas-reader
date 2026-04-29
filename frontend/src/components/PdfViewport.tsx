@@ -683,10 +683,24 @@ export function PdfViewport({
           </div>
         ))}
 
-        {/* Loading overlay — richer card with download progress + phase.
-            Gate visibility on a delay+min-duration so sub-150ms loads don't
-            flash, and once shown the card stays for at least 450ms so the
-            slide-up animation is perceivable. */}
+        {/* Centered loader for the initial-fetch case: no pages have been
+            laid out yet, so the bottom-anchored progress card sits at the
+            very bottom of an otherwise empty tall viewport and is easy to
+            miss. We show this only while the first download is in flight
+            (no pages computed). Once parsing starts, page placeholders fill
+            the viewport and the bottom card takes over. */}
+        {loading && pages.length === 0 && (
+          <div
+            className="absolute inset-0 flex items-center justify-center pointer-events-none px-6"
+            aria-live="polite"
+          >
+            <InitialPdfLoadingCard phase={loadPhase} />
+          </div>
+        )}
+
+        {/* Bottom progress card — richer, with download progress + phase.
+            Visible during parsing / page prep, when the centered card has
+            already faded out and page placeholders are filling the area. */}
         <GatedLoadingCard loading={loading} phase={loadPhase} />
 
         {/* Error overlay. */}
@@ -757,6 +771,45 @@ function GatedLoadingCard({ loading, phase }: { loading: boolean; phase: LoadPha
 
   if (!visible) return null;
   return <LoadingCard phase={phase} />;
+}
+
+
+/**
+ * Centered initial-fetch loader. Shown only while the first PDF download is
+ * in flight and no pages have been laid out yet — i.e. the viewport is
+ * otherwise empty and the bottom progress card is too easy to miss. As soon
+ * as parsing starts and placeholders fill the viewport, this fades out and
+ * the bottom card carries the rest of the loading story.
+ *
+ * No show-delay gate here: this is the *only* signal the user has during
+ * the initial download (now that arXiv PDFs aren't disk-cached, every open
+ * is a real network round trip), so any delay is wasted attention.
+ */
+function InitialPdfLoadingCard({ phase }: { phase: LoadPhase }) {
+  let detail: string | null = null;
+  let pct: number | null = null;
+
+  if (phase.kind === "fetching" && phase.total > 0) {
+    pct = Math.round(Math.max(0, Math.min(1, phase.loaded / phase.total)) * 100);
+    detail = `${formatBytes(phase.loaded)} of ${formatBytes(phase.total)}`;
+  } else if (phase.kind === "fetching" && phase.loaded > 0) {
+    detail = formatBytes(phase.loaded);
+  }
+
+  return (
+    <div
+      className="flex flex-col items-center gap-3 max-w-[320px] text-center fade-up-bottom"
+      role="status"
+    >
+      <Loader2 size={28} className="animate-spin" style={{ color: "var(--ac1)" }} aria-hidden />
+      <div className="text-[13px] font-medium text-slate-200">
+        Downloading PDF{pct !== null ? ` · ${pct}%` : ""}
+      </div>
+      <div className="text-[11px] text-slate-400 min-h-[1em]">
+        {detail ?? "Streaming from arxiv.org…"}
+      </div>
+    </div>
+  );
 }
 
 
