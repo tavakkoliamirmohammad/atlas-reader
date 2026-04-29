@@ -1,15 +1,19 @@
 import pytest
-from unittest.mock import AsyncMock, patch
+from contextlib import asynccontextmanager
+from unittest.mock import patch
 
 from app import db, glossary, papers
 from app.arxiv import Paper
 
 
-# extract_terms now reads the paper's PDF via the AI's Read tool. Tests don't
-# actually have a PDF on disk, so we mock ensure_cached in every extract_terms
-# test below.
+# extract_terms reads the paper's PDF via the AI's Read tool. Tests don't
+# actually have a PDF on disk, so we stub the per-call temp-PDF context
+# manager in every extract_terms test below.
 def _patch_pdf():
-    return patch("app.glossary.pdf_cache.ensure_cached", new=AsyncMock(return_value="/tmp/g1.pdf"))
+    @asynccontextmanager
+    async def _fake(_arxiv_id):
+        yield "/tmp/g1.pdf"
+    return patch("app.glossary.pdf_fetch.paper_pdf_for_ai", _fake)
 
 
 SAMPLE = Paper(

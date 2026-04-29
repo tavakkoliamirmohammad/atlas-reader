@@ -32,7 +32,7 @@ from typing import AsyncIterator, Final, TypedDict
 
 import httpx
 
-from app import ai_backend, papers, pdf_cache
+from app import ai_backend, papers, pdf_fetch
 from app.ai_backend import normalize_backend
 from app.podcast_segments import split_sentences
 from app.tts_client import (
@@ -211,31 +211,33 @@ async def _generate_locked(
     tmp_dir = mp3.parent / f".tmp-{length}"
 
     try:
-        # Phase 1: script generation
-        pdf_path = await pdf_cache.ensure_cached(arxiv_id)
-        # Voice/constraints/output rules live in podcast_common.txt; the
-        # per-length file only carries the length-specific structure. Keeping
-        # the shared parts in one file avoids drift across the three lengths.
-        common = (PROMPT_DIR / "podcast_common.txt").read_text()
-        length_block = (PROMPT_DIR / f"podcast_{length}.txt").read_text()
-        prompt = (
-            common
-            + "\n\n"
-            + length_block
-            + f"\n\nPDF: {pdf_path}\nUse the Read tool to read the PDF before writing."
-        )
+        # Phase 1: script generation. The temp PDF is held only for the
+        # duration of the AI call; once the script text is in `script_parts`
+        # we don't need the file on disk anymore.
+        async with pdf_fetch.paper_pdf_for_ai(arxiv_id) as pdf_path:
+            # Voice/constraints/output rules live in podcast_common.txt; the
+            # per-length file only carries the length-specific structure.
+            # Keeping shared parts in one file avoids drift across lengths.
+            common = (PROMPT_DIR / "podcast_common.txt").read_text()
+            length_block = (PROMPT_DIR / f"podcast_{length}.txt").read_text()
+            prompt = (
+                common
+                + "\n\n"
+                + length_block
+                + f"\n\nPDF: {pdf_path}\nUse the Read tool to read the PDF before writing."
+            )
 
-        script_parts: list[str] = []
-        async for chunk in ai_backend.run_ai(
-            backend=normalize_backend(backend),
-            task="podcast",
-            directive="Write the podcast script.",
-            prompt=prompt,
-            model=model,
-            enable_read_file=str(pdf_path),
-        ):
-            script_parts.append(chunk)
-            yield {"type": "script_chunk", "text": chunk}
+            script_parts: list[str] = []
+            async for chunk in ai_backend.run_ai(
+                backend=normalize_backend(backend),
+                task="podcast",
+                directive="Write the podcast script.",
+                prompt=prompt,
+                model=model,
+                enable_read_file=str(pdf_path),
+            ):
+                script_parts.append(chunk)
+                yield {"type": "script_chunk", "text": chunk}
 
         raw_script = "".join(script_parts).strip()
         if not raw_script:
